@@ -33,7 +33,7 @@ structure Parser (a : Type) where
     run s = some result → result.2.IsSuffix s
 
 --
-def nullable (p : Parser a) : Prop = (∀ s : String) (∀ x : a) (p.run s) ≠ (some (s, x))
+def nullable (p : Parser a) := ∀ s : Str, ∀ x : a, (p.run s) ≠ (some (x, s))
 
 def fail  (_ : Parser a) : Parser a where
   run := fun _ => none
@@ -53,6 +53,12 @@ def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
     sorry
   }
 
+theorem or_notNullable (p1 : Parser a) (p2 : Parser a)
+ (h1 : ¬ nullable p1) (h2 : ¬ nullable p2) : ¬ nullable (or p1 p2) :=
+  by {
+    sorry
+  }
+
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
   -- Run p1 on the input (will return Some(v1, rest1) if successful)
@@ -69,28 +75,21 @@ def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
   decreases := by {
     sorry
   }
-def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b where
+
+def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
-  match p1.run input with
-    | some (_, rest1) =>
-      match p2.run rest1 with
-        | some (v2, rest2) => some (v2, rest2)
-        | none => none
-    | none => none
-  decreases := by {
-    sorry
-  }
-def extractL  (p1 : Parser a) (p2 : Parser b) : Parser a where
-  run := fun input =>
-    match p1.run input with
-      | some (v1, rest1) =>
-        match p2.run rest1 with
-          | some (_, _) => some (v1, rest1)
-          | none => none
+    match p.run input with
+      | some (v, rest) => some (f v, rest)
       | none => none
   decreases := by {
     sorry
   }
+
+def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
+  map (fun x => x.2) (concat p1 p2)
+
+def extractL  (p1 : Parser a) (p2 : Parser b) : Parser a :=
+  map (fun x => x.1) (concat p1 p2)
 
 -- Lean doesn't recognize that rest is strictly smaller; need to convince it of
 -- this fact!!
