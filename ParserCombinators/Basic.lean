@@ -28,9 +28,7 @@ none or, in the success case, the parsed result and the rest of the unparsed inp
 -/
 structure Parser (a : Type) where
   run : Str → Option (a × Str)
-  decreases : ∀ s result,
-    -- run s = some result → result.2.length ≤ s.length
-    run s = some result → result.2.IsSuffix s
+  decreases : ∀ s result, run s = some result → result.snd <:+ s
 
 --
 def nullable (p : Parser a) := ∀ s : Str, ∀ x : a, (p.run s) ≠ (some (x, s))
@@ -50,8 +48,23 @@ def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
           | some (success_parser, success_input)=> some (success_parser, success_input)
           | none => none
   decreases := by {
-    sorry
+    intro s result
+    simp
+    intro h
+    cases h1 : p1.run s
+    · cases h2 : p2.run s
+      · simp [h1, h2] at h
+      · simp only [h1, h2, Option.some.injEq] at h
+        rw [Prod.eta] at h
+        rw [h] at h2
+        exact p2.decreases s result h2
+    · simp only [h1, Option.some.injEq] at h
+      rw [Prod.eta] at h
+      rw [h] at h1
+      exact p1.decreases s result h1
   }
+
+
 
 theorem or_notNullable (p1 : Parser a) (p2 : Parser a)
  (h1 : ¬ nullable p1) (h2 : ¬ nullable p2) : ¬ nullable (or p1 p2) :=
