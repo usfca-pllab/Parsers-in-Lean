@@ -35,10 +35,12 @@ def not_nullable (p : Parser a) := ∀ s :Str, ∀ x : a, (p.run s) ≠ (some (x
 
 def fail  (_ : Parser a) : Parser a where
   run := fun _ => none
-  decreases := by {
+  decreases := by
     intro s result h
     contradiction
-  }
+
+theorem fail_not_nullable : ∀ p : Parser a, not_nullable (fail p) := by
+  simp [not_nullable, fail]
 
 def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
   run := fun input =>
