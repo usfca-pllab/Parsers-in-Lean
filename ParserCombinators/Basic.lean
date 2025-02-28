@@ -31,7 +31,7 @@ structure Parser (a : Type) where
   decreases : ∀ s result, run s = some result → result.snd <:+ s
 
 --
-def nullable (p : Parser a) := ∀ s : Str, ∀ x : a, (p.run s) ≠ (some (x, s))
+def not_nullable (p : Parser a) := ∀ s :Str, ∀ x : a, (p.run s) ≠ (some (x, s))
 
 def fail  (_ : Parser a) : Parser a where
   run := fun _ => none
@@ -66,11 +66,14 @@ def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
 
 
 
-theorem or_notNullable (p1 : Parser a) (p2 : Parser a)
- (h1 : ¬ nullable p1) (h2 : ¬ nullable p2) : ¬ nullable (or p1 p2) :=
-  by {
-    sorry
-  }
+theorem or_not_nullable (p1 : Parser a) (p2 : Parser a)
+  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (or p1 p2) := by
+  revert h1 h2
+  simp [not_nullable]
+  intro h1 h2 s x
+  have h_p1 : p1.run s ≠ some (x, s) := h1 s x
+  have h_p2 : p2.run s ≠ some (x, s) := h2 s x
+  sorry
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
