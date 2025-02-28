@@ -30,8 +30,26 @@ structure Parser (a : Type) where
   run : Str → Option (a × Str)
   decreases : ∀ s result, run s = some result → result.snd <:+ s
 
---
 def not_nullable (p : Parser a) := ∀ s :Str, ∀ x : a, (p.run s) ≠ (some (x, s))
+
+theorem decreases_if_not_nullable (p : Parser a) (h : not_nullable p) (s : Str) (result : a × Str)
+  (h_run : p.run s = some result) :
+  result.snd.length < s.length := by
+    have h_non_increasing := p.decreases s result h_run
+    obtain ⟨x', s'⟩ := result
+    simp at h_non_increasing
+    have h_not_eq := h s
+    simp only [h_run, ne_eq, Option.some.injEq] at h_not_eq
+    simp
+    have h_not_eq' : s' ≠ s := by
+      intro h_eq
+      exact h_not_eq x' (congrArg (Prod.mk x') h_eq)
+
+    rw [@Nat.lt_iff_le_and_ne]
+    constructor
+    · exact List.IsSuffix.length_le h_non_increasing
+    · intro h_eq
+      exact h_not_eq' (List.IsSuffix.eq_of_length h_non_increasing h_eq)
 
 def fail  (_ : Parser a) : Parser a where
   run := fun _ => none
