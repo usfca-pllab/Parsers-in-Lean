@@ -64,16 +64,26 @@ def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
       exact p1.decreases s result h1
   }
 
-
-
 theorem or_not_nullable (p1 : Parser a) (p2 : Parser a)
-  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (or p1 p2) := by
+  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (or p1 p2) := by {
   revert h1 h2
-  simp [not_nullable]
+  simp [not_nullable, _root_.or]
   intro h1 h2 s x
   have h_p1 : p1.run s ≠ some (x, s) := h1 s x
   have h_p2 : p2.run s ≠ some (x, s) := h2 s x
-  sorry
+  intro h
+  cases h1 : p1.run s
+  · cases h2 : p2.run s
+    · simp [h1, h2] at h
+    · simp only [h1, h2, Option.some.injEq] at h
+      rw [Prod.eta] at h
+      rw [h] at h2
+      exact h_p2 h2
+  · simp only [h1, Option.some.injEq] at h
+    rw [Prod.eta] at h
+    rw [h] at h1
+    exact h_p1 h1
+  }
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
@@ -109,7 +119,7 @@ def extractL  (p1 : Parser a) (p2 : Parser b) : Parser a :=
 
 -- Lean doesn't recognize that rest is strictly smaller; need to convince it of
 -- this fact!!
-partial def many  (p : Parser a) : Parser (List a) where
+partial def many (p : Parser a) : Parser (List a) where
   run := fun input =>
     match p.run input with
     | some (v, rest) =>
