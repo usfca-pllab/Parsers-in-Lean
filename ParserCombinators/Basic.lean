@@ -128,7 +128,14 @@ def map  (f : a -> b) (p : Parser a) : Parser b where
       | some (v, rest) => some (f v, rest)
       | none => none
   decreases := by {
-    sorry
+    intro s result
+    cases h : p.run s with
+    | none => simp [h]
+    | some pair =>
+      simp only [Option.some.injEq, h]
+      intro h_snd
+      rw [← h_snd]
+      simp [p.decreases s pair h]
   }
 
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
