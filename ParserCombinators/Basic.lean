@@ -137,40 +137,24 @@ def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
 def extractL  (p1 : Parser a) (p2 : Parser b) : Parser a :=
   map (fun x => x.1) (concat p1 p2)
 
--- Lean doesn't recognize that rest is strictly smaller; need to convince it of
--- this fact!!
-partial def many (p : Parser a) : Parser (List a) where
-  run := fun input =>
-    match p.run input with
-    | some (v, rest) =>
-      match (many p).run rest with
-      | some (vs, rest_rec) => some (v :: vs, rest_rec)
-      | none => some ([v], rest)
-    | none => some ([], input)
-  decreases := by {
-    sorry
-  }
+-- Making this a separate def makes writing the recursive function easier to work with.
+private def many_run (p : Parser a) (h : not_nullable p) (input : Str) : Option (List a × Str) :=
+  match h_run : p.run input with
+  | some (v, rest) =>
+    -- for termination
+    have : rest.length < input.length := decreases_if_not_nullable p h input (v, rest) h_run
+    match many_run p h rest with
+    | some (vs, rest_rec) => some (v :: vs, rest_rec)
+    | none => some ([v], rest)
+  | none => some ([], input)
+termination_by input.length
 
--- Attempt to get rid of partial:
--- def many  (p : Parser a) : Parser (List a) where
---   run := WellFounded.fix (measure String.length).wf (
---   fun input rec =>
---     match p.run input with
---     | some (v, rest) =>
---       match rec rest (by {
---         sorry
---       })
---       with
---       | some (vs, final_rest) => some (v :: vs, final_rest)
---       | none => some ([v], rest)
---     | none => some ([], input)
---   )
---   decreases := by {
---     sorry
---   }
-partial def many1  (p : Parser a) : Parser (List a) where
-  run := sorry
-  decreases := sorry
+def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
+  run := many_run p h
+  decreases := by sorry
+
+def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
+  map (fun x => x.1 :: x.2) (concat p (many p h))
 
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
