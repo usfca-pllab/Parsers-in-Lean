@@ -1,3 +1,4 @@
+open Option
 /-!
 
 # Parser Monad
@@ -130,14 +131,11 @@ def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
         let (v2, rest2) := pair2
         have h_p1 := p1.decreases s (v1, rest1) h1
         have h_p2 := p2.decreases rest1 (v2, rest2) h2
-        /-
-          I can't figure out how to complete this proof.
-          My thinking is to try and transitively get that
-          rest1.length < s.length, and rest2.length < rest1.length, and then
-          transitively get rest2.length < s.length, but I can't figure out how
-          to wrangle Lean to do that.
-        -/
-        sorry
+        simp only at h_p1
+        simp only at h_p2
+        simp only [Option.some.injEq, h1, h2] at h_run
+        rw [<- h_run]
+        exact List.IsSuffix.trans h_p2 h_p1
   }
 
 theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
@@ -151,9 +149,10 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
       cases h2_case : p2.run rest1 with
       | none => simp [h1_case, h2_case] at h_run
       | some =>
-        rw [h_run] at h2_case
-        have h_p2 := h2 rest1 v2
-        contradiction
+        -- have h_p2 := h2 rest1
+        -- I just need to rewrite h_p2 somehow to fit what Lean is looking for
+        -- contradiction
+        sorry
   }
 
 def map  (f : a -> b) (p : Parser a) : Parser b where
@@ -172,6 +171,14 @@ def map  (f : a -> b) (p : Parser a) : Parser b where
       simp [p.decreases s pair h]
   }
 
+theorem map_not_nullable (f : a → b) (p : Parser a)
+  (h1 : not_nullable p) : not_nullable (map f p1) := by {
+    intro s y
+    simp [map]
+    cases h_p : p.run s with
+    | none => sorry
+    | some pair => sorry
+  }
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
   map (fun x => x.2) (concat p1 p2)
 
