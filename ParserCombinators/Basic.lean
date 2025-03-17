@@ -140,6 +140,22 @@ def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
         sorry
   }
 
+theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
+  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (concat p1 p2) := by {
+    intro s x h_run
+    simp [concat] at h_run
+    cases h1_case : p1.run s with
+    | none => simp [h1_case] at h_run
+    | some pair =>
+      let (v1, rest1) := pair
+      cases h2_case : p2.run rest1 with
+      | none => simp [h1_case, h2_case] at h_run
+      | some =>
+        rw [h_run] at h2_case
+        have h_p2 := h2 rest1 v2
+        contradiction
+  }
+
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
     match p.run input with
