@@ -119,7 +119,25 @@ def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
           | none => none
       | none => none
   decreases := by {
-    sorry
+    intro s result h_run
+    cases h1 : p1.run s with
+    | none => simp [h1] at h_run
+    | some pair1 =>
+      let (v1, rest1) := pair1
+      cases h2 : p2.run rest1 with
+      | none => simp [h1, h2] at h_run
+      | some pair2 =>
+        let (v2, rest2) := pair2
+        have h_p1 := p1.decreases s (v1, rest1) h1
+        have h_p2 := p2.decreases rest1 (v2, rest2) h2
+        /-
+          I can't figure out how to complete this proof.
+          My thinking is to try and transitively get that
+          rest1.length < s.length, and rest2.length < rest1.length, and then
+          transitively get rest2.length < s.length, but I can't figure out how
+          to wrangle Lean to do that.
+        -/
+        sorry
   }
 
 def map  (f : a -> b) (p : Parser a) : Parser b where
