@@ -194,12 +194,10 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
               exact suffix_antisymm (h1 s pair h1_case) h_p2_prefix
             have h_pair2 : pair2 = (pair2.fst, s) := by
               rw [<- h_rest2]
-            rw [h_pair2] at h2_case
+            rw [h_pair, h_pair2] at h2_case
             exact h s pair2.fst h2_case
   }
 
--- TODO: When I'm not using sorry
--- #guard
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
     match p.run input with
@@ -264,7 +262,10 @@ def parseA := parseChar (fun c => c == 'a')
 
 def parseB := parseChar (fun c => c == 'b')
 
--- TODO: Not sure how to fix this
+
+-- TODO: When I'm not using sorry
+-- #guard
+
 -- def eps : Parser Unit := fun input => (() , input)
 
 -- #eval parseA.run "abc".data-- success
@@ -280,7 +281,6 @@ def parseB := parseChar (fun c => c == 'b')
 -- #eval parseB.run "".data-- failure
 -- #eval parseB.run "bbbbbbbb".data--success
 --
--- -- TODO: Not sure how to fix these:
 -- #eval fail parseA.run "a".data
 -- #eval fail parseB.run "b".data
 -- #eval or parseA parseB "b".data
