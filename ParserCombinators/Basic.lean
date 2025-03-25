@@ -137,24 +137,69 @@ def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
         rw [<- h_run]
         exact List.IsSuffix.trans h_p2 h_p1
   }
+local instance : Std.Antisymm fun (x1 x2 : Char) => ¬x1 < x2 where
+  antisymm := Char.notLTAntisymm.antisymm
+
+-- the lemma below took me a while to figure out because mathlib4 doesn't have it
+theorem suffix_antisymm {s1 s2 : Str} (h1 : s1 <:+ s2) (h2 : s2 <:+ s1) : s1 = s2 := by
+  rw [<- List.reverse_reverse s1]
+  rw [<- List.reverse_reverse s2]
+  rw [List.reverse_inj]
+  have h_prefix1 := List.reverse_prefix.mpr h1
+  have h_prefix2 := List.reverse_prefix.mpr h2
+  have h1 := List.IsPrefix.le h_prefix1
+  have h2 := List.IsPrefix.le h_prefix2
+  apply (List.le_antisymm h1 h2)
 
 theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
-  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (concat p1 p2) := by {
+  (h : not_nullable p1 ∨ not_nullable p2) : not_nullable (concat p1 p2) := by {
     intro s x h_run
     simp [concat] at h_run
     cases h1_case : p1.run s with
     | none => simp [h1_case] at h_run
     | some pair =>
-      let (v1, rest1) := pair
-      cases h2_case : p2.run rest1 with
-      | none => simp [h1_case, h2_case] at h_run
-      | some =>
-        -- have h_p2 := h2 rest1
-        -- I just need to rewrite h_p2 somehow to fit what Lean is looking for
-        -- contradiction
-        sorry
+      cases h
+      · rename_i h
+        dsimp [not_nullable] at h
+        have h2 := p2.decreases
+        cases h2_case : p2.run pair.snd with
+        | none => simp [h1_case, h2_case] at h_run
+        | some pair2 =>
+          simp [*] at h_run
+          have ⟨h_data2, h_rest2⟩ := h_run
+          have h_pair_snd : pair.snd = s := by
+            have h_p1_prefix := (p1.decreases s pair h1_case)
+            have h_p2_prefix := (p2.decreases pair.snd pair2 h2_case)
+            rw [h_rest2] at h_p2_prefix
+            apply suffix_antisymm h_p1_prefix h_p2_prefix
+          have h_pair : pair = (x.fst, s) := by
+            rw [<- h_data2]
+            apply Prod.ext
+            simp
+            simp [h_pair_snd]
+          rw [h_pair] at h1_case
+          exact h s x.fst h1_case
+      · rename_i h
+        dsimp[not_nullable] at h
+        have h1 := p1.decreases
+        cases h2_case : p2.run pair.snd with
+          | none => simp [h1_case, h2_case] at h_run
+          | some pair2 =>
+            simp [*] at h_run
+            have ⟨h_data2, h_rest2⟩ := h_run
+            have h_pair : pair.snd = s := by
+              have h_p1_prefix := (p1.decreases s pair h1_case)
+              have h_p2_prefix := (p2.decreases pair.snd pair2 h2_case)
+              rw [h_rest2] at h_p2_prefix
+              exact suffix_antisymm (h1 s pair h1_case) h_p2_prefix
+            have h_pair2 : pair2 = (pair2.fst, s) := by
+              rw [<- h_rest2]
+            rw [h_pair2] at h2_case
+            exact h s pair2.fst h2_case
   }
 
+-- TODO: When I'm not using sorry
+-- #guard
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
     match p.run input with
