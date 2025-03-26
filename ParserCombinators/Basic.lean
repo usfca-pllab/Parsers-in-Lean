@@ -249,7 +249,8 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
   intros s res
   induction s with
   | nil =>
-    simp only [List.suffix_nil, Prod.forall]
+    -- simp only [List.suffix_nil, Prod.forall]
+    simp only [List.suffix_nil]
     sorry
   | cons c s' ih =>
     cases h1 : p.run (c :: s') with
