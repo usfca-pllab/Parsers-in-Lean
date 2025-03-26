@@ -215,12 +215,17 @@ def map  (f : a -> b) (p : Parser a) : Parser b where
   }
 
 theorem map_not_nullable (f : a → b) (p : Parser a)
-  (h1 : not_nullable p) : not_nullable (map f p1) := by {
-    intro s y
-    simp [map]
+  (h1 : not_nullable p) : not_nullable (map f p) := by {
+    intro s y h_run
+    simp [map] at h_run
     cases h_p : p.run s with
-    | none => sorry
-    | some pair => sorry
+    | none => simp [h_p] at h_run
+    | some pair =>
+      let (v, rest) := pair
+      rw [h_p] at h_run
+      dsimp at h_run
+      rcases h_run with ⟨h_eq1, h_eq2⟩
+      exact h1 s v h_p
   }
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
   map (fun x => x.2) (concat p1 p2)
