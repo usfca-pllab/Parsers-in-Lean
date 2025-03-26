@@ -246,7 +246,7 @@ private def many_run (p : Parser a) (h : not_nullable p) (input : Str) : Option 
 termination_by input.length
 
 theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (res : List a × Str), many_run p h s = some res → res.2 <:+ s := by {
-  intro s
+  intros s res
   induction s with
   | nil =>
     simp only [List.suffix_nil, Prod.forall]
@@ -254,7 +254,6 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
   | cons c s' ih =>
     cases h1 : p.run (c :: s') with
     | none =>
-      simp only [Prod.forall]
       sorry
     | some => sorry
 }
