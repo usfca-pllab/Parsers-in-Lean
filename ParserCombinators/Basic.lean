@@ -249,7 +249,12 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
   intros s res h_many
   rw [many_run] at h_many
   induction s using many_run.induct p h
+  -- Case 1: Case where p succeeds, and recursive call succeeds
   · sorry
+    -- rename_i I can't figure out these names??
+
+
+  -- Case 2: Case where p succeeds, but recursive call fails
   · rename_i s v rest h_run e h_recur ih
     simp at h_many
     rw [h_run] at h_many
@@ -259,6 +264,7 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
     have h' := (p.decreases s (v, rest)) h_run
     simp at h'
     simp [<- h_many, h']
+  -- Case 3: Base case, p fails from the start
   · rename_i s h_run
     simp only at h_many
     rw [h_run] at h_many
