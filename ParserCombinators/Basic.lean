@@ -22,7 +22,7 @@ def parseA : Parser Char :=
 
 variable {a b : Type}
 
-def Str := List Char
+abbrev Str := List Char
 /-
 Parser, returns an instance of the monadic ParseResult (either returns
 none or, in the success case, the parsed result and the rest of the unparsed input)
@@ -263,9 +263,9 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
     simp [<- h_many, h']
 
     -- induce on `rest`
-    simp at ih
     rw [many_run] at h_recur
     simp at h_recur
+    simp at ih
     have h_tmp := ih vs s' h_recur
     exact List.IsSuffix.trans (ih vs s' h_recur) h'
 
@@ -305,7 +305,12 @@ def parseChar (pred : Char -> Bool): Parser Char where
         if pred c then some (c, cs)
         else none
   decreases := by {
-    sorry
+    intros input result h
+    cases h_in : input
+    · simp [h_in] at h
+    · rename_i c cs
+      simp [h_in] at h
+      simp [<- h.right]
   }
 def parseA := parseChar (fun c => c == 'a')
 
@@ -313,7 +318,7 @@ def parseB := parseChar (fun c => c == 'b')
 
 
 -- TODO: When I'm not using sorry
--- #guard
+#guard parseA.run "abc".data == some ('a', ['b', 'c'])
 
 -- def eps : Parser Unit := fun input => (() , input)
 
