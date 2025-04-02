@@ -248,13 +248,21 @@ termination_by input.length
 theorem many_run_decreases (p : Parser a) (h : not_nullable p) :
   ∀ (s : Str) (res : List a × Str), many_run p h s = some res → res.2 <:+ s := by {
     intros s res h_many
-    unfold many_run at h_many
-    split at h_many
-    next pair h_run_some => sorry
-    next h_run_none =>
+    -- unfold many_run at h_many
+    cases h_run : p.run s with
+    | none =>
       rw [Option.some.injEq] at h_many
       rw [← h_many]
-      exact List.suffix_refl ([], s).snd
+      apply List.IsSuffix.refl
+    | some => sorry
+
+
+    -- split at h_many
+    -- next pair h_run_some => sorry
+    -- next h_run_none =>
+    --   rw [Option.some.injEq] at h_many
+    --   rw [← h_many]
+    --   exact List.suffix_refl ([], s).snd
   }
 
 def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
