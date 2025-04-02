@@ -250,9 +250,36 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
   rw [many_run] at h_many
   induction s using many_run.induct p h
   -- Case 1: Case where p succeeds, and recursive call succeeds
-  · sorry
-    -- rename_i I can't figure out these names??
+  · rename_i s v rest h_run e vs s' h_recur ih
+    -- TODO: Need to deduce `res = (v :: vs, s')`
+    -- Simplify h_many into a cleaner defintion
+    dsimp only [many_run] at h_many
+    -- Helper theorem that will show that the result of calling `many_run` is equal to `some (v :: vs, s')`
+    have h_match_eval :  (match many_run p h rest with
+                     | some (vs_inner, s_inner) => some (v :: vs_inner, s_inner)
+                     | none => some ([v], rest))
+                   = some (v :: vs, s') := by
+      rw [h_recur]
+    -- Helper theorem that will show that `some res` equals `h_match_eval` lefthand side
+    have h_many_symm : some res =
+        match many_run p h rest with
+        | some (vs_inner, s_inner) => some (v :: vs_inner, s_inner)
+        | none => some ([v], rest)
+        := by sorry
 
+    -- Use some injectivity to prove that those are equal
+    sorry
+
+    -- Once I have that `res = (v :: vs, s')`, need to sub it into the goal
+    -- (`res.snd <:+ s`) to get `(v::vs, s').snd <:+ s` (simplifies to `s' <:+ s`)
+
+    -- Then, once I have `s' <:+ s`, I need to use `ih` to get `s' <:+ rest`
+
+    -- Then I need to use `h_run` (`p.run s = some (v, rest)`) and `h`
+    -- (`not_nullable p`) to get `e` (`List.length rest < List.length s`)
+    -- (because `p` decreases)
+
+    -- Then I should be able to combine `s' <:+ rest` and `rest <:+ s` using transitivity
 
   -- Case 2: Case where p succeeds, but recursive call fails
   · rename_i s v rest h_run e h_recur ih
