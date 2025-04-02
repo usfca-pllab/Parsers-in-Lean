@@ -245,25 +245,27 @@ private def many_run (p : Parser a) (h : not_nullable p) (input : Str) : Option 
   | none => some ([], input)
 termination_by input.length
 
-theorem many_run_decreases (p : Parser a) (h : not_nullable p) :
-  ∀ (s : Str) (res : List a × Str), many_run p h s = some res → res.2 <:+ s := by {
-    intros s res h_many
-    -- unfold many_run at h_many
-    cases h_run : p.run s with
-    | none =>
-      rw [Option.some.injEq] at h_many
-      rw [← h_many]
-      apply List.IsSuffix.refl
-    | some => sorry
-
-
-    -- split at h_many
-    -- next pair h_run_some => sorry
-    -- next h_run_none =>
-    --   rw [Option.some.injEq] at h_many
-    --   rw [← h_many]
-    --   exact List.suffix_refl ([], s).snd
-  }
+theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (res : List a × Str), many_run p h s = some res → res.2 <:+ s := by {
+  intros s res h_many
+  rw [many_run] at h_many
+  induction s using many_run.induct p h
+  · sorry
+  · rename_i s v rest h_run e h_recur ih
+    simp at h_many
+    rw [h_run] at h_many
+    simp at h_many
+    simp [h_recur] at h_many
+    simp at ih
+    have h' := (p.decreases s (v, rest)) h_run
+    simp at h'
+    simp [<- h_many, h']
+  · rename_i s h_run
+    simp only at h_many
+    rw [h_run] at h_many
+    simp only [some.injEq] at h_many
+    rw [<- h_many]
+    simp
+}
 
 def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
   run := many_run p h
