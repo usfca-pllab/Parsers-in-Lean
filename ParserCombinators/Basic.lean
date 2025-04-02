@@ -248,24 +248,26 @@ termination_by input.length
 theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (res : List a × Str), many_run p h s = some res → res.2 <:+ s := by {
   intros s res h_many
   rw [many_run] at h_many
-  induction s using many_run.induct p h
+  induction s using many_run.induct p h generalizing res
   -- Case 1: Case where p succeeds, and recursive call succeeds
   · rename_i s v rest h_run e vs s' h_recur ih
     -- TODO: Need to deduce `res = (v :: vs, s')`
     -- Simplify h_many into a cleaner defintion
-    dsimp only [many_run] at h_many
-    -- Helper theorem that will show that the result of calling `many_run` is equal to `some (v :: vs, s')`
-    have h_match_eval :  (match many_run p h rest with
-                     | some (vs_inner, s_inner) => some (v :: vs_inner, s_inner)
-                     | none => some ([v], rest))
-                   = some (v :: vs, s') := by
-      rw [h_recur]
-    -- Helper theorem that will show that `some res` equals `h_match_eval` lefthand side
-    have h_many_symm : some res =
-        match many_run p h rest with
-        | some (vs_inner, s_inner) => some (v :: vs_inner, s_inner)
-        | none => some ([v], rest)
-        := by sorry
+    dsimp [many_run] at h_many
+
+    -- get to the viable case in h_many
+    rw [h_run] at h_many
+    simp at h_many
+    simp [h_recur] at h_many
+    have h' := (p.decreases s (v, rest)) h_run
+    simp at h'
+    simp [<- h_many, h']
+
+    -- induce on `rest`
+    simp at ih
+    rw [many_run] at h_recur
+    simp at h_recur
+    have h_tmp := ih vs s' h_recur
 
     -- Use some injectivity to prove that those are equal
     sorry
