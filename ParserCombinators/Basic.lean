@@ -312,6 +312,11 @@ def parseChar (pred : Char -> Bool): Parser Char where
       simp [h_in] at h
       simp [<- h.right]
   }
+
+-- just a sketch of correctness
+theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
+ : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := sorry
+
 def parseA := parseChar (fun c => c == 'a')
 
 def parseB := parseChar (fun c => c == 'b')
