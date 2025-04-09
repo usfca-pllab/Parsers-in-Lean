@@ -303,14 +303,12 @@ def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
   run := many_run p h
   decreases := by exact many_run_decreases p h
 
--- TODO: Structure question here: Should we write `many` and `many1` theorems
--- separately? Or could I prove it for `many` and call it a day?
--- ALSO not really sure how to reason about the none case in `many_run` here
-
--- theorem many
-
 def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
   map (fun x => x.1 :: x.2) (concat p (many p h))
+
+theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (many1 p h) := by
+  dsimp [many1]
+  simp only [Or.inl h, concat_not_nullable, map_not_nullable]
 
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
