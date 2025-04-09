@@ -315,14 +315,20 @@ def parseChar (pred : Char -> Bool): Parser Char where
 
 -- just a sketch of correctness
 theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
- : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := sorry
+ : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := by
+  have h_none : (parseChar pred).run [] = none := by
+    unfold parseChar
+    exact rfl
+  match s with
+  | [] =>
+    rw [h_none]
+    simp only [reduceCtorEq, List.nil_eq, false_and]
+  | c' :: cs' => sorry
 
 def parseA := parseChar (fun c => c == 'a')
 
 def parseB := parseChar (fun c => c == 'b')
 
-
--- TODO: When I'm not using sorry
 #guard parseA.run "abc".data == some ('a', ['b', 'c'])
 
 -- def eps : Parser Unit := fun input => (() , input)
