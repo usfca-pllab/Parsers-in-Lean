@@ -330,39 +330,19 @@ def parseChar (pred : Char -> Bool): Parser Char where
 -- just a sketch of correctness
 theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
  : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := by
-  -- TODO: Should I be using split or iff.intro?? Neither of those work
-  -- split
-  -- {
-
-
-  -- }
-  -- {
-
-  -- }
-
-  -- example I found on leanprover-community:
---   variables p q : Prop
--- -- BEGIN
--- theorem and_swap : p ∧ q ↔ q ∧ p :=
--- iff.intro
---   (assume h : p ∧ q,
---     show q ∧ p, from and.intro (and.right h) (and.left h))
---   (assume h : q ∧ p,
---     show p ∧ q, from and.intro (and.right h) (and.left h))
-
--- #check and_swap p q    -- p ∧ q ↔ q ∧ p
--- -- END
-
-  have h_none : (parseChar pred).run [] = none := by
-    unfold parseChar
-    exact rfl
-  match s with
-  -- TODO: Do I need to prove the other direction in this case? No, right?
-      -- Because the iff equality just doesn't hold?
-  | [] =>
-    rw [h_none]
-    simp only [reduceCtorEq, List.nil_eq, false_and]
-  | c' :: cs' => sorry
+  constructor
+  · sorry
+  · sorry
+  -- have h_none : (parseChar pred).run [] = none := by
+  --   unfold parseChar
+  --   exact rfl
+  -- match s with
+  -- -- TODO: Do I need to prove the other direction in this case? No, right?
+  --     -- Because the iff equality just doesn't hold?
+  -- | [] =>
+  --   rw [h_none]
+  --   simp only [reduceCtorEq, List.nil_eq, false_and]
+  -- | c' :: cs' => sorry
 
 def parseA := parseChar (fun c => c == 'a')
 
