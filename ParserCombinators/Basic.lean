@@ -61,6 +61,8 @@ def fail  (_ : Parser a) : Parser a where
 theorem fail_not_nullable : ∀ p : Parser a, not_nullable (fail p) := by
   simp [not_nullable, fail]
 
+theorem fail_is_correct (p : Parser a) : (fail p).run s = none := rfl
+
 def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
   run := fun input =>
     match p1.run input with
@@ -85,7 +87,7 @@ def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
       exact p1.decreases s result h1
   }
 
-theorem or_not_nullable (p1 : Parser a) (p2 : Parser a)
+theorem or_not_nullable (p1 p2 : Parser a)
   (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (or p1 p2) := by {
   revert h1 h2
   simp [not_nullable, _root_.or]
@@ -105,6 +107,9 @@ theorem or_not_nullable (p1 : Parser a) (p2 : Parser a)
     rw [h] at h1
     exact h_p1 h1
   }
+
+theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or p1 p2).run s = some (x, rest) ↔ p1.run s =
+  some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by sorry
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
@@ -198,6 +203,10 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
             exact h s pair2.fst h2_case
   }
 
+theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest : Str) (rest1 : Str)
+  : (concat p1 p2).run s = some ((xa, xb), rest1) ↔ p1.run s = some (xa, rest) ∧ p2.run rest = some (xb, rest1)
+    := by sorry
+
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
     match p.run input with
@@ -227,6 +236,8 @@ theorem map_not_nullable (f : a → b) (p : Parser a)
       rcases h_run with ⟨h_eq1, h_eq2⟩
       exact h1 s v h_p
   }
+theorem map_is_correct (f : a -> b) (p : Parser a) (x : a) (x1 : b) (rest : Str) : (map f p).run s = some (f x, rest) ↔ p.run s = some (x, rest) := by sorry
+
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
   map (fun x => x.2) (concat p1 p2)
 
@@ -292,9 +303,12 @@ def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
   run := many_run p h
   decreases := by exact many_run_decreases p h
 
+-- TODO: Structure question here: Should we write `many` and `many1` theorems
+-- separately? Or could I prove it for `many_run_decreases` and call it a day?
 
 def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
   map (fun x => x.1 :: x.2) (concat p (many p h))
+
 
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
