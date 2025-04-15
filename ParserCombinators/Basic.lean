@@ -63,7 +63,7 @@ theorem fail_not_nullable : ∀ p : Parser a, not_nullable (fail p) := by
 
 theorem fail_is_correct (p : Parser a) : (fail p).run s = none := rfl
 
-def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
+def or_parser  (p1 : Parser a) (p2 : Parser a) : Parser a where
   run := fun input =>
     match p1.run input with
        | some (success_parser, success_input)=> some (success_parser, success_input)
@@ -88,9 +88,9 @@ def or  (p1 : Parser a) (p2 : Parser a) : Parser a where
   }
 
 theorem or_not_nullable (p1 p2 : Parser a)
-  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (or p1 p2) := by {
+  (h1 : not_nullable p1) (h2 : not_nullable p2) : not_nullable (or_parser p1 p2) := by {
   revert h1 h2
-  simp [not_nullable, _root_.or]
+  simp [not_nullable, or_parser]
   intro h1 h2 s x
   have h_p1 : p1.run s ≠ some (x, s) := h1 s x
   have h_p2 : p2.run s ≠ some (x, s) := h2 s x
@@ -108,14 +108,15 @@ theorem or_not_nullable (p1 p2 : Parser a)
     exact h_p1 h1
   }
 
-theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or p1 p2).run s = some (x, rest) ↔ p1.run s =
+theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
   constructor
-  intro h
-  match h1 : p1.run s with
-   | none => sorry
-   | some res => sorry
-  · sorry
+  · intro h_fwd
+    cases h1 : p1.run s with
+      | none => sorry
+      | some res => sorry
+  · intro h_bwd
+    sorry
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
