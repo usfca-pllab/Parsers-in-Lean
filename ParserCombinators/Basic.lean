@@ -109,7 +109,14 @@ theorem or_not_nullable (p1 p2 : Parser a)
   }
 
 theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or p1 p2).run s = some (x, rest) ↔ p1.run s =
-  some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by sorry
+  some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
+  constructor
+  · unfold _root_.or
+    intro h
+    cases h : p1.run s
+    · sorry
+    · sorry
+  · sorry
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
@@ -337,8 +344,8 @@ theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
   --   unfold parseChar
   --   exact rfl
   -- match s with
-  -- -- TODO: Do I need to prove the other direction in this case? No, right?
-  --     -- Because the iff equality just doesn't hold?
+  -- TODO: Do I need to prove the other direction in this case? No, right?
+  -- Because the iff equality just doesn't hold?
   -- | [] =>
   --   rw [h_none]
   --   simp only [reduceCtorEq, List.nil_eq, false_and]
