@@ -111,9 +111,8 @@ theorem or_not_nullable (p1 p2 : Parser a)
 theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or p1 p2).run s = some (x, rest) ↔ p1.run s =
   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
   constructor
-  · unfold _root_.or
-    intro h
-    cases h : p1.run s
+  intro h
+  · cases h : p1.run s
     · sorry
     · sorry
   · sorry
