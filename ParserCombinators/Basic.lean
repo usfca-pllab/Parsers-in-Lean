@@ -112,9 +112,9 @@ theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or p1
   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
   constructor
   intro h
-  · cases h : p1.run s
-    · sorry
-    · sorry
+  match h1 : p1.run s with
+   | none => sorry
+   | some res => sorry
   · sorry
 
 -- Parser Concatenations
