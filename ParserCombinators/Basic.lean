@@ -111,12 +111,22 @@ theorem or_not_nullable (p1 p2 : Parser a)
 theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
   constructor
-  · intro h_fwd
+  · intro h
     cases h1 : p1.run s with
-      | none => sorry
+    -- Should we be using the And.elim and Or.elim? If so, how do we get that to work?
+    -- https://lean-lang.org/theorem_proving_in_lean4/propositions_and_proofs.html
+    | none => sorry
+    | some res => sorry
+  · intro h
+    cases h1 : p1.run s with
+      | none =>
+        cases h2 : p2.run s with
+        -- I was thinking this case is just trivial, but how do I convince Lean of this?
+        | none => sorry
+        | some res => sorry
+      -- Likewise, I would think this would be easy to prove, because it's
+      -- almost the left side of the disjunction, right?
       | some res => sorry
-  · intro h_bwd
-    sorry
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
@@ -209,10 +219,20 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
             rw [h_pair, h_pair2] at h2_case
             exact h s pair2.fst h2_case
   }
-
+-- theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
+--   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
+--   constructor
+--   · intro h_fwd
+--     cases h1 : p1.run s with
+--       | none => sorry
+--       | some res => sorry
+--   · intro h_bwd
+--     sorry
 theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest : Str) (rest1 : Str)
   : (concat p1 p2).run s = some ((xa, xb), rest1) ↔ p1.run s = some (xa, rest) ∧ p2.run rest = some (xb, rest1)
-    := by sorry
+    := by
+    constructor
+    · intro h_fwd
 
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
