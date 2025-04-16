@@ -121,12 +121,13 @@ theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_pa
     cases h1 : p1.run s with
       | none =>
         cases h2 : p2.run s with
-        -- I was thinking this case is just trivial, but how do I convince Lean of this?
+        -- I was thinking this case is just trivially contradictory, but how do I convince Lean of this?
         | none => sorry
         | some res => sorry
       -- Likewise, I would think this would be easy to prove, because it's
       -- almost the left side of the disjunction, right?
       | some res => sorry
+      -- I need to change `res` somehow to be (x, rest), right?
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
@@ -219,20 +220,24 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
             rw [h_pair, h_pair2] at h2_case
             exact h s pair2.fst h2_case
   }
--- theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
---   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
---   constructor
---   · intro h_fwd
---     cases h1 : p1.run s with
---       | none => sorry
---       | some res => sorry
---   · intro h_bwd
---     sorry
+
 theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest : Str) (rest1 : Str)
   : (concat p1 p2).run s = some ((xa, xb), rest1) ↔ p1.run s = some (xa, rest) ∧ p2.run rest = some (xb, rest1)
     := by
     constructor
-    · intro h_fwd
+    · intro h
+      cases h1 : p1.run s with
+      | none => sorry
+      | some res =>
+        cases h2 : p2.run s with
+        | none => sorry
+        | some res1 => sorry
+    · intro h
+      sorry
+      -- Again, this is going to involve breaking up the disjunction and
+      -- conjuction and proving for each part that the goal follows, but I can't
+      -- find a valid way to do that, even from here:
+      -- https://leanprover-community.github.io/mathematics_in_lean/C03_Logic.html
 
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
@@ -263,7 +268,21 @@ theorem map_not_nullable (f : a → b) (p : Parser a)
       rcases h_run with ⟨h_eq1, h_eq2⟩
       exact h1 s v h_p
   }
-theorem map_is_correct (f : a -> b) (p : Parser a) (x : a) (x1 : b) (rest : Str) : (map f p).run s = some (f x, rest) ↔ p.run s = some (x, rest) := by sorry
+theorem map_is_correct (f : a -> b) (p : Parser a) (x : a) (x1 : b) (rest : Str) : (map f p).run s = some (f x, rest) ↔ p.run s = some (x, rest) := by
+  constructor
+  · intro h
+    cases hf : p.run s with
+    -- This is a contradiction, no?
+    | none => sorry
+    | some res => sorry
+  · intro h
+    -- Can I just say that this is true because of the definition of the map parser?
+    unfold map at h
+    -- Why is this no goals (and also what does "expected type" mean exactly?)
+    -- but won't let me take away the sorry?
+    exact
+    sorry
+
 
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
   map (fun x => x.2) (concat p1 p2)
@@ -358,8 +377,12 @@ def parseChar (pred : Char -> Bool): Parser Char where
 theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
  : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := by
   constructor
-  · sorry
-  · sorry
+  · intro h
+    cases h_pred : (parseChar pred).run s with
+    | none => sorry
+    | some res => sorry
+  · intro h
+    sorry
   -- have h_none : (parseChar pred).run [] = none := by
   --   unfold parseChar
   --   exact rfl
