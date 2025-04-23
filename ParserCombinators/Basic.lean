@@ -52,6 +52,7 @@ theorem decreases_if_not_nullable (p : Parser a) (h : not_nullable p) (s : Str) 
     · intro h_eq
       exact h_not_eq' (List.IsSuffix.eq_of_length h_non_increasing h_eq)
 
+@[simp]
 def fail  (_ : Parser a) : Parser a where
   run := fun _ => none
   decreases := by
@@ -111,23 +112,30 @@ theorem or_not_nullable (p1 p2 : Parser a)
 theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
   constructor
-  · intro h
-    cases h1 : p1.run s with
-    -- Should we be using the And.elim and Or.elim? If so, how do we get that to work?
-    -- https://lean-lang.org/theorem_proving_in_lean4/propositions_and_proofs.html
-    | none => sorry
-    | some res => sorry
-  · intro h
-    cases h1 : p1.run s with
+  · unfold or_parser
+    simp
+    cases h1 : p1.run s
+    · simp
+      cases h2 : p2.run s
+      · simp
+      · simp
+        intro h_fst h_snd
+        exact Prod.ext h_fst h_snd
+    · simp
+      intro h_fst h_snd
+      exact Prod.ext h_fst h_snd
+  · cases h1 : p1.run s with
       | none =>
-        cases h2 : p2.run s with
-        -- I was thinking this case is just trivially contradictory, but how do I convince Lean of this?
-        | none => sorry
-        | some res => sorry
-      -- Likewise, I would think this would be easy to prove, because it's
-      -- almost the left side of the disjunction, right?
-      | some res => sorry
-      -- I need to change `res` somehow to be (x, rest), right?
+        simp
+        intro h2
+        unfold or_parser
+        simp [h1, h2]
+      | some res =>
+        simp
+        intro h
+        rw [h] at h1
+        unfold or_parser
+        simp [h1]
 
 -- Parser Concatenations
 def concat  (p1 : Parser a) (p2 : Parser b) : Parser (a × b) where
@@ -221,23 +229,35 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
             exact h s pair2.fst h2_case
   }
 
-theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest : Str) (rest1 : Str)
+theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest1 rest2: Str)
   : (concat p1 p2).run s = some ((xa, xb), rest1) ↔ p1.run s = some (xa, rest) ∧ p2.run rest = some (xb, rest1)
     := by
     constructor
-    · intro h
+    · intro h_concat_run
+      unfold concat at h_concat_run
+      simp only [] at h_concat_run
       cases h1 : p1.run s with
-      | none => sorry
+      | none =>
+        simp [h1] at h_concat_run
       | some res =>
-        cases h2 : p2.run s with
-        | none => sorry
-        | some res1 => sorry
+        cases res with
+        | mk xa' rest =>
+          simp [h1] at h_concat_run
+          cases h2 : p2.run rest with
+          | none =>
+            simp [h2] at h_concat_run
+          | some res2 =>
+            cases res2 with
+            | mk xb' rest1' =>
+              simp only [h2] at h_concat_run
+              injection h_concat_run with h_overall_eq
+              injection h_overall_eq with h_pair_eq h_rest1'_eq
+              injection h_pair_eq with h_xa'_eq h_xb'_eq
+              -- subst h_xa'_eq h_xb'_eq h_rest1'_eq
+              sorry
     · intro h
-      sorry
-      -- Again, this is going to involve breaking up the disjunction and
-      -- conjuction and proving for each part that the goal follows, but I can't
-      -- find a valid way to do that, even from here:
-      -- https://leanprover-community.github.io/mathematics_in_lean/C03_Logic.html
+      unfold concat
+      simp [h]
 
 def map  (f : a -> b) (p : Parser a) : Parser b where
   run := fun input =>
@@ -277,13 +297,8 @@ theorem map_is_correct (f : a -> b) (p : Parser a) (x : a) (x1 : b) (rest : Str)
     | some res => sorry
   · intro h
     -- Can I just say that this is true because of the definition of the map parser?
-    unfold map at h
-    -- Why is this no goals (and also what does "expected type" mean exactly?)
-    -- but won't let me take away the sorry?
-    exact
-    sorry
-
-
+    unfold map
+    simp [h]
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
   map (fun x => x.2) (concat p1 p2)
 
@@ -354,7 +369,12 @@ def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
 
 theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (many1 p h) := by
   dsimp [many1]
+  -- TODO: When I add the `@[simp]` to the above parsers, it makes this not work.
+  -- I'm not sure why?
   simp only [Or.inl h, concat_not_nullable, map_not_nullable]
+
+-- TODO: (after rest of correctness proofs) Figure out what this signature needs to look like
+-- theorem many_is_correct (p : Parser a) :
 
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
