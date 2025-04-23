@@ -229,8 +229,8 @@ theorem concat_not_nullable (p1 : Parser a) (p2 : Parser b)
             exact h s pair2.fst h2_case
   }
 
-theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest1 rest2: Str)
-  : (concat p1 p2).run s = some ((xa, xb), rest1) ↔ p1.run s = some (xa, rest) ∧ p2.run rest = some (xb, rest1)
+theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb : b) (rest1 : Str)
+  : (concat p1 p2).run s = some ((xa, xb), rest1) ↔ ∃ rest2, p1.run s = some (xa, rest2) ∧ p2.run rest2 = some (xb, rest1)
     := by
     constructor
     · intro h_concat_run
@@ -241,9 +241,10 @@ theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb
         simp [h1] at h_concat_run
       | some res =>
         cases res with
-        | mk xa' rest =>
+        | mk xa' rest2 =>
+          exists rest2
           simp [h1] at h_concat_run
-          cases h2 : p2.run rest with
+          cases h2 : p2.run rest2 with
           | none =>
             simp [h2] at h_concat_run
           | some res2 =>
@@ -253,9 +254,8 @@ theorem concat_is_correct (p1 : Parser a) (p2 : Parser b) (s : Str) (xa : a) (xb
               injection h_concat_run with h_overall_eq
               injection h_overall_eq with h_pair_eq h_rest1'_eq
               injection h_pair_eq with h_xa'_eq h_xb'_eq
-              -- subst h_xa'_eq h_xb'_eq h_rest1'_eq
-              sorry
-    · intro h
+              simp [*]
+    · intro ⟨rest2, h⟩
       unfold concat
       simp [h]
 
@@ -291,14 +291,18 @@ theorem map_not_nullable (f : a → b) (p : Parser a)
 theorem map_is_correct (f : a -> b) (p : Parser a) (x : a) (x1 : b) (rest : Str) : (map f p).run s = some (f x, rest) ↔ p.run s = some (x, rest) := by
   constructor
   · intro h
+    unfold map at h
+    simp only at h
     cases hf : p.run s with
-    -- This is a contradiction, no?
-    | none => sorry
-    | some res => sorry
+    | none => simp [hf] at h
+    | some res =>
+    -- I'm really having issues with extracting these equivalences- this is definitely a pain point for me.
+    -- Maybe we can talk about how I can work on this in the meeting today
+      sorry
   · intro h
-    -- Can I just say that this is true because of the definition of the map parser?
     unfold map
     simp [h]
+
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
   map (fun x => x.2) (concat p1 p2)
 
