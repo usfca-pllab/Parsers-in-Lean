@@ -288,19 +288,21 @@ theorem map_not_nullable (f : a → b) (p : Parser a)
       rcases h_run with ⟨h_eq1, h_eq2⟩
       exact h1 s v h_p
   }
-theorem map_is_correct (f : a -> b) (p : Parser a) (x : a) (x1 : b) (rest : Str) : (map f p).run s = some (f x, rest) ↔ p.run s = some (x, rest) := by
+theorem map_is_correct (f : a -> b) (p : Parser a) (y : b) (rest : Str) :
+  (map f p).run s = some (y, rest) ↔ ∃ x, (f x = y) ∧ p.run s = some (x, rest) := by
+  unfold map
+  simp
   constructor
   · intro h
-    unfold map at h
-    simp only at h
-    cases hf : p.run s with
-    | none => simp [hf] at h
+    cases hp : p.run s with
+    | none =>
+      simp [hp] at h
     | some res =>
-    -- I'm really having issues with extracting these equivalences- this is definitely a pain point for me.
-    -- Maybe we can talk about how I can work on this in the meeting today
-      sorry
-  · intro h
-    unfold map
+      simp only [hp, some.injEq, Prod.mk.injEq] at h
+      exists res.fst
+      simp only [h]
+      simp [<- h.2]
+  · intro ⟨x, h⟩
     simp [h]
 
 def extractR  (p1 : Parser a) (p2 : Parser b) : Parser b :=
