@@ -399,29 +399,28 @@ def parseChar (pred : Char -> Bool): Parser Char where
       simp [<- h.right]
   }
 
--- just a sketch of correctness
 theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
  : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := by
   constructor
   · intro h
-    cases h_pred : (parseChar pred).run s with
-    | none => sorry
-    | some res => sorry
+    unfold parseChar at h
+    simp at h
+    match s with
+    | [] => contradiction
+    | c_inner :: cs_inner =>
+      simp only [ite_none_right_eq_some, some.injEq, Prod.mk.injEq] at h
+      have ⟨h1, h2, h3⟩ := h
+      rw [h2] at h1
+      simp [h1, h2, h3]
   · intro h
-    sorry
-  -- have h_none : (parseChar pred).run [] = none := by
-  --   unfold parseChar
-  --   exact rfl
-  -- match s with
-  -- TODO: Do I need to prove the other direction in this case? No, right?
-  -- Because the iff equality just doesn't hold?
-  -- | [] =>
-  --   rw [h_none]
-  --   simp only [reduceCtorEq, List.nil_eq, false_and]
-  -- | c' :: cs' => sorry
+    unfold parseChar
+    simp
+    rcases h with ⟨h_eq, h_pred⟩
+    rw [h_eq]
+    simp
+    apply h_pred
 
 def parseA := parseChar (fun c => c == 'a')
-
 def parseB := parseChar (fun c => c == 'b')
 
 #guard parseA.run "abc".data == some ('a', ['b', 'c'])
