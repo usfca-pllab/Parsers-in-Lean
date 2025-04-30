@@ -379,7 +379,10 @@ theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (m
   -- I'm not sure why?
   simp only [Or.inl h, concat_not_nullable, map_not_nullable]
 
--- TODO: (after rest of correctness proofs) Figure out what this signature needs to look like
+-- TODO: From the TRX paper: os this what we want to model off of?
+-- Program Fixpoint parse (T : Type) (e : PExp T | is gr exp e) (s : string)
+-- {measure (e, s)(≻)} : {r : ParsingResult T | ∃ n, [e, s ] ⇒ [n, r ]}
+
 -- theorem many_is_correct (p : Parser a) :
 
 -- Testing
