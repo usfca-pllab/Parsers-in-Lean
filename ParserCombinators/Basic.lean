@@ -370,6 +370,18 @@ def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
   run := many_run p h
   decreases := by exact many_run_decreases p h
 
+theorem many_is_correct1 (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
+  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  sorry
+
+theorem many_is_correct2 (p : Parser a) (h : not_nullable p) (s : Str)
+  : (many p h).run s = some ([], s) ↔ p.run s = none := by
+  sorry
+
+theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
+  : ∃ xs rest, (many p h).run s = some (xs, rest) := by
+  sorry
+
 def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
   map (fun x => x.1 :: x.2) (concat p (many p h))
 
@@ -379,7 +391,13 @@ theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (m
   -- I'm not sure why?
   simp only [Or.inl h, concat_not_nullable, map_not_nullable]
 
--- theorem many_is_correct (p : Parser a) :
+theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
+  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  sorry
+
+theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a)
+  : (many p h).run s = some (xs, rest) → xs ≠ [] := by
+  sorry
 
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
