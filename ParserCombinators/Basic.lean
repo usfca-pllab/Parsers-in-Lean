@@ -387,12 +387,10 @@ def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
 
 theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (many1 p h) := by
   dsimp [many1]
-  -- TODO: When I add the `@[simp]` to the above parsers, it makes this not work.
-  -- I'm not sure why?
   simp only [Or.inl h, concat_not_nullable, map_not_nullable]
 
 theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
-  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  : (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
   sorry
 
 theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a)
