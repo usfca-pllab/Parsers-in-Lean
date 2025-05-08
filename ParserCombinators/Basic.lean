@@ -378,28 +378,48 @@ theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (m
   dsimp [many1]
   simp only [Or.inl h, concat_not_nullable, map_not_nullable]
 
-theorem many_nonempty_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
-  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
-  -- A non-empty list x :: xs is parsed if and only if there exists a `rest'`
-  -- that, when `p.run` is called on any `s`, the result is (x, rest') (meaning that
-  -- it produces something different, and not output that's the same as the
-  -- input)
-  -- AND
-  -- that then many runs on that output (`rest'`) and returns `xs`
-  -- (not the same as `x`) and `rest` (I'm not sure I understand why this is
-  -- `rest` and not `rest'`?)
-  sorry
-
-theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
-  : (many p h).run s = some ([], s) ↔ p.run s = none := by
-  -- An empty list is parsed iff `p.run` is called on any `s` and produces none (immediately fails).
-  sorry
-
 theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
   : ∃ xs rest, (many p h).run s = some (xs, rest) := by
-  -- There exist `xs` and `rest` variables that, when `many p h.run` is called
-  -- on any `s`, the parser always produces `(xs, rest)` as a result
-  sorry
+ -- TODO: I feel like I'm at the point of being able to say each case is a some, but how do I actually write that?
+  cases p.run s with
+  | some res =>
+    unfold many many_run
+    simp
+    cases p.run s with
+    | some res_inner =>
+      simp only
+      sorry
+    | none => sorry
+  | none => sorry
+
+theorem many_nonempty_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
+  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  constructor
+  · intro hmany
+    unfold many many_run at hmany
+    simp at hmany
+    cases p.run s with
+    | some =>
+      simp only [some.injEq]
+      -- My thinking is that I could potentially do: `apply many_yields_some` here, or is that wishful thinking?
+      sorry
+    | none => sorry
+    -- immediately returns an empty list and the rest of the input unchanged
+  · sorry
+theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
+  : (many p h).run s = some ([], s) ↔ p.run s = none := by
+  unfold many many_run
+  constructor
+  · intro h_many_run
+    simp at h_many_run
+    cases p.run s with
+    -- TODO: How do I actually convince Lean that the only way to get an empty list is through the immediate none case?
+    | some res => sorry
+    | none => sorry
+  · intro h_many_run
+    simp at h_many_run
+    sorry
+    -- TODO: This feels like it's going to just be a very similar proof. Am I thinking about this correctly?
 
   theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
   : (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
@@ -407,7 +427,7 @@ theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
   sorry
 
 theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a)
-  : (many p h).run s = some (xs, rest) → xs ≠ [] := by
+  : (many1 p h).run s = some (xs, rest) → xs ≠ [] := by
   sorry
 
 -- Testing
