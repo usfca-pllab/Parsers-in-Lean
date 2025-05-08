@@ -423,13 +423,16 @@ theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
 
   theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
   : (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
-  -- many1 (which matches one or more of the `a` passed into `p`) parses a non-empty list if and only if there exists a `rest'` s.t. calling `p.run` on `s` ...
   sorry
 
 theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a)
   : (many1 p h).run s = some (xs, rest) → xs ≠ [] := by
+  intro h_many1
+  unfold many1 at h_many1
+  -- TODO: Not sure how to proceed from here. I know that I need to somehow
+  -- extract the fact that some(xs, rest) can only result from this operation if
+  -- (concat p (many p h)).run s must have produced a some, but I don't know what tactic that would be
   sorry
-
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
   run := fun input =>
