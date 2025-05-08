@@ -109,7 +109,8 @@ theorem or_not_nullable (p1 p2 : Parser a)
     exact h_p1 h1
   }
 
-theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) : (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
+theorem or_is_correct (p1 p2 : Parser a) (s : Str) (x : a) (rest : Str) :
+ (or_parser p1 p2).run s = some (x, rest) ↔ p1.run s =
   some (x, rest) ∨ p1.run s = none ∧ p2.run s = some (x, rest) := by
   constructor
   · unfold or_parser
@@ -370,18 +371,6 @@ def many (p : Parser a) (h : not_nullable p) : Parser (List a) where
   run := many_run p h
   decreases := by exact many_run_decreases p h
 
-theorem many_is_correct1 (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
-  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
-  sorry
-
-theorem many_is_correct2 (p : Parser a) (h : not_nullable p) (s : Str)
-  : (many p h).run s = some ([], s) ↔ p.run s = none := by
-  sorry
-
-theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
-  : ∃ xs rest, (many p h).run s = some (xs, rest) := by
-  sorry
-
 def many1 (p : Parser a) (h : not_nullable p) : Parser (List a) :=
   map (fun x => x.1 :: x.2) (concat p (many p h))
 
@@ -389,8 +378,32 @@ theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (m
   dsimp [many1]
   simp only [Or.inl h, concat_not_nullable, map_not_nullable]
 
-theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
+theorem many_nonempty_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
+  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  -- A non-empty list x :: xs is parsed if and only if there exists a `rest'`
+  -- that, when `p.run` is called on any `s`, the result is (x, rest') (meaning that
+  -- it produces something different, and not output that's the same as the
+  -- input)
+  -- AND
+  -- that then many runs on that output (`rest'`) and returns `xs`
+  -- (not the same as `x`) and `rest` (I'm not sure I understand why this is
+  -- `rest` and not `rest'`?)
+  sorry
+
+theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
+  : (many p h).run s = some ([], s) ↔ p.run s = none := by
+  -- An empty list is parsed iff `p.run` is called on any `s` and produces none (immediately fails).
+  sorry
+
+theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
+  : ∃ xs rest, (many p h).run s = some (xs, rest) := by
+  -- There exist `xs` and `rest` variables that, when `many p h.run` is called
+  -- on any `s`, the parser always produces `(xs, rest)` as a result
+  sorry
+
+  theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
   : (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  -- many1 (which matches one or more of the `a` passed into `p`) parses a non-empty list if and only if there exists a `rest'` s.t. calling `p.run` on `s` ...
   sorry
 
 theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a)
