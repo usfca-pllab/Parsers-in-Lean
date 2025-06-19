@@ -390,29 +390,38 @@ theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
     | none => simp
   | none => simp
 
+
 theorem many_nonempty_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
-  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
-  unfold many many_run
+  : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = some (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  unfold many
+  simp only
   constructor
-  · intro hmany
-    unfold many many_run at hmany
-    simp at hmany
+  · intro h_many
+    unfold many_run at h_many
+    simp at h_many
     cases h_p_run_s : p.run s with
     | some res_p =>
-      let val_v := res_p.fst
-      let str_rest_p := res_p.snd
-      obtain ⟨val_vs_rec, str_rest_s_p_rec, h_rec⟩ : ∃ vs r, many_run p h str_rest_p = some (vs, r) :=
-        many_yields_some p h str_rest_p
-      have h_expanded_many_run : many_run p h s = some (val_v :: val_vs_rec, str_rest_s_p_rec) := by
-        unfold many_run
-        simp [h_p_run_s, h_rec]
-        sorry
-      sorry
+      rw [h_p_run_s] at h_many
+      simp only at h_many
+      exists res_p.snd
+      rw [<- Prod.eta res_p]
+      simp
+      have ⟨vs, rest_rec, h''⟩ := many_yields_some p h res_p.snd
+      unfold many at h''
+      simp at h''
+      simp [h''] at h_many
+      simp [h'', h_many]
     | none =>
-      rw [h_p_run_s] at hmany
-      simp only [Option.some.injEq, Prod.mk.injEq] at hmany
-      exact List.noConfusion hmany.left
-  · sorry
+      rw [h_p_run_s] at h_many
+      simp only [Option.some.injEq, Prod.mk.injEq] at h_many
+      exact List.noConfusion h_many.left
+  · intro ⟨rest', ⟨h_p_run_s, h_rec⟩⟩
+    unfold many_run
+    simp
+    rw [h_p_run_s]
+    simp
+    simp [h_rec]
+
 theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
   : (many p h).run s = some ([], s) ↔ p.run s = none := by
   unfold many many_run
