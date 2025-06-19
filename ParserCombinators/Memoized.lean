@@ -3,6 +3,7 @@
 
 import Std.Data.DHashMap.Basic
 import Std.Data.HashMap.Basic
+import Std.Data.HashMap.AdditionalOperations
 
 variable { α : Type }  { μ : Type → Type }
 
@@ -42,9 +43,27 @@ def fresh : Memo (Tag α) := do
 
 -- Some of the α's here should become existential/hidden
 structure Parser (μ : Type -> Type) [Monad μ] (α : Type) where
-  getState : Int -> (StateT MemoData) (ReaderM String) (Std.HashMap Int (μ a))
+  getState : Int -> (StateT MemoData) (ReaderM String) (Std.HashMap Int (μ α))
 
 
--- TODO: figure out if HashMap is not Functor?
--- instance [Monad μ] : Functor (Parser μ) where
---   map f x := ⟨ Functor.map ((Functor.map f) <$> _) ∘ x.getState ⟩
+instance [Monad μ] : Functor (Parser μ) where
+  map f x := ⟨ Functor.map (Std.HashMap.map (fun _ => Functor.map f)) ∘ x.getState ⟩
+
+-- N.B. Have to define `pure` separately so that we can use it in `seq`
+instance [Monad μ] : Pure (Parser μ) where
+  pure a := ⟨fun pos => pure {(pos, pure a)}⟩
+
+-- might need other type class instances (e.g. to make fold work)
+-- also, you may need to define or find a fold operation for Std.HashMap
+instance [Monad μ] [Alternative μ] : Bind (Parser μ) where
+  bind := sorry
+
+instance [Monad μ] [Alternative μ] : Applicative (Parser μ) where
+  -- derived from the Monad laws
+  seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
+
+instance [Monad μ] [Alternative μ] : Alternative (Parser μ) where
+  failure := sorry -- empty in Haskell
+  orElse r1 r2 := sorry -- (<|>) in Haskell but r2 is lazy
+
+instance [Monad μ] [Alternative μ] : Monad (Parser μ) where
