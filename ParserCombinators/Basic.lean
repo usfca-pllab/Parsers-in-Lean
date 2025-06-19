@@ -432,10 +432,28 @@ theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
     simp
     rw [h_many_run]
 
+-- theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str) :
+--   (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = some (x, rest') ∧ (many p h).run rest' = some (xs, rest) :=
+-- by
+--   sorry
+
 theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str) :
   (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = some (x, rest') ∧ (many p h).run rest' = some (xs, rest) :=
 by
-  sorry
+  unfold many1
+  rw [map_is_correct]
+  constructor
+  · rintro ⟨y, hy, hconcat⟩
+    rcases y with ⟨x', xs'⟩
+    injection hy with hx hxs
+    subst hx
+    subst hxs
+    rw [concat_is_correct] at hconcat
+    exact hconcat
+  · intro ⟨rest', hprun, hmanyrun⟩
+    exact ⟨(x, xs), rfl, by
+    rw [concat_is_correct]
+    exact ⟨rest', hprun, hmanyrun⟩⟩
 
 
 theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a) (rest : Str)
