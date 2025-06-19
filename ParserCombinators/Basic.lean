@@ -380,59 +380,85 @@ theorem many1_not_nullable (p : Parser a) (h : not_nullable p) : not_nullable (m
 
 theorem many_yields_some (p : Parser a) (h : not_nullable p) (s : Str)
   : ∃ xs rest, (many p h).run s = some (xs, rest) := by
- -- TODO: I feel like I'm at the point of being able to say each case is a some, but how do I actually write that?
+  unfold many many_run
+  simp
   cases p.run s with
-  | some res =>
-    unfold many many_run
+  | some res_inner =>
     simp
-    cases p.run s with
-    | some res_inner =>
-      simp only
-      sorry
-    | none => sorry
-  | none => sorry
+    cases many_run p h res_inner.snd with
+    | some res => simp
+    | none => simp
+  | none => simp
 
 theorem many_nonempty_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
   : (many p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+  unfold many many_run
   constructor
   · intro hmany
     unfold many many_run at hmany
     simp at hmany
-    cases p.run s with
-    | some =>
-      simp only [some.injEq]
-      -- My thinking is that I could potentially do: `apply many_yields_some` here, or is that wishful thinking?
+    cases h_p_run_s : p.run s with
+    | some res_p =>
+      let val_v := res_p.fst
+      let str_rest_p := res_p.snd
+      obtain ⟨val_vs_rec, str_rest_s_p_rec, h_rec⟩ : ∃ vs r, many_run p h str_rest_p = some (vs, r) :=
+        many_yields_some p h str_rest_p
+      have h_expanded_many_run : many_run p h s = some (val_v :: val_vs_rec, str_rest_s_p_rec) := by
+        unfold many_run
+        simp [h_p_run_s, h_rec]
+        sorry
       sorry
-    | none => sorry
-    -- immediately returns an empty list and the rest of the input unchanged
+    | none =>
+      rw [h_p_run_s] at hmany
+      simp only [Option.some.injEq, Prod.mk.injEq] at hmany
+      exact List.noConfusion hmany.left
   · sorry
 theorem many_empty_is_correct (p : Parser a) (h : not_nullable p) (s : Str)
   : (many p h).run s = some ([], s) ↔ p.run s = none := by
   unfold many many_run
   constructor
-  · intro h_many_run
-    simp at h_many_run
+  · simp
     cases p.run s with
-    -- TODO: How do I actually convince Lean that the only way to get an empty list is through the immediate none case?
-    | some res => sorry
-    | none => sorry
+    | some res =>
+      intro h'
+      simp at h'
+      revert h'
+      cases many_run p h res.snd with
+      | some => simp
+      | none => simp
+    | none => intro; rfl
   · intro h_many_run
     simp at h_many_run
-    sorry
-    -- TODO: This feels like it's going to just be a very similar proof. Am I thinking about this correctly?
+    simp
+    rw [h_many_run]
 
-  theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str)
-  : (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = (x, rest') ∧ (many p h).run rest' = some (xs, rest) := by
+theorem many1_is_correct (p : Parser a) (h : not_nullable p) (s : Str) (x : a) (xs : List a) (rest : Str) :
+  (many1 p h).run s = some (x :: xs, rest) ↔ ∃ rest', p.run s = some (x, rest') ∧ (many p h).run rest' = some (xs, rest) :=
+by
   sorry
 
-theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a)
-  : (many1 p h).run s = some (xs, rest) → xs ≠ [] := by
-  intro h_many1
-  unfold many1 at h_many1
-  -- TODO: Not sure how to proceed from here. I know that I need to somehow
-  -- extract the fact that some(xs, rest) can only result from this operation if
-  -- (concat p (many p h)).run s must have produced a some, but I don't know what tactic that would be
-  sorry
+
+theorem many1_yields_nonempty (p : Parser a) (h : not_nullable p) (s : Str) (xs : List a) (rest : Str)
+  : (many1 p h).run s = some (xs, rest) → xs ≠ [] :=
+by
+  intro h_run
+  unfold many1 at h_run
+  simp [map] at h_run
+  cases h_concat : (concat p (many p h)).run s with
+| none =>
+    rw [h_concat] at h_run
+    contradiction
+| some val =>
+      rcases val with ⟨⟨x, xs'⟩, rest'⟩
+      rw [h_concat] at h_run
+      simp at h_run
+      rcases h_run with ⟨hxs, hrest⟩
+      subst hxs
+      subst hrest
+      intro contra
+      contradiction
+
+
 -- Testing
 def parseChar (pred : Char -> Bool): Parser Char where
   run := fun input =>
