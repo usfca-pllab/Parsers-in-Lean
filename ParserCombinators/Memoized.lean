@@ -10,7 +10,12 @@ variable { α : Type }  { μ : Type → Type }
 structure Tag (α : Type) where
   id : Int
   deriving DecidableEq
+  -- TODO: Can we add the below change here for code cleanup?
 
+-- Is this necessary? I feel like DecidableEq does this, but maybe I'm misunderstanding what DecidableEq does?
+-- I looked it up and it looks like we could just do this on line 13:
+-- deriving DecidableEq, BEq, Hashable (we still need BEq to be added as an instance, but Lean can
+-- supposedly do it for us??)
 instance : BEq (Tag α) where
   beq t u := t.id == u.id
 
@@ -23,6 +28,16 @@ def resultType (tag : Tag α) := α
 --
 -- Also enforce some inequality constraint on carried types for tags?
 -- Like if t : Tag α, u : Tag β then u == v → α = β
+
+-- TODO: Would type erasure be a better solution?
+-- Here's why I think it would be:
+---- It's a simpler approach from a design perspective.
+---- While it would lead to a higher risk of runtime failures in theory, I think we could easily
+---- encapsulate the lack of safety into one, guaranteed-to-compile function for memoization
+---- This function would be something we write with guarantees that if we're at a specific cache slot, we could
+---- ONLY have previously executed on the exact same parser (and thus it would have the exact same type)
+---- Does this mean that we have more responsibility? Yes, but we only have to have that responsibility in one
+---- specific "unsafe" function, and we could build the rest of our library on that function safely (AND elegantly, IMO)
 --
 -- Also, the α should be pushed inside the table field as much as possible
 structure MemoData [Hashable (Tag Unit)] [BEq (Tag Unit)] where
