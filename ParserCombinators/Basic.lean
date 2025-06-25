@@ -20,6 +20,8 @@ def parseA : Parser Char :=
         ParseResult.failure ("Unexpected character: " ++ c.toString)
 -/
 
+namespace ParserCombinators.Basic
+
 variable {a b : Type}
 
 abbrev Str := List Char
