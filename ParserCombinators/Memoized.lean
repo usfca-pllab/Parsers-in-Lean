@@ -4,6 +4,7 @@
 import Std.Data.DHashMap.Basic
 import Std.Data.HashMap.Basic
 import Std.Data.HashMap.AdditionalOperations
+import Std.Data.HashMap.Lemmas
 
 variable { α : Type }  { μ : Type → Type }
 
@@ -47,8 +48,23 @@ instance [Monad μ] : Pure (Parser μ) where
 -- might need other type class instances (e.g. to make fold work)
 -- also, you may need to define or find a fold operation for Std.HashMap
 instance [Monad μ] [Alternative μ] : Bind (Parser μ) where
-  bind := sorry
-
+  bind {α β} x f := {
+    -- This is the function that will get us our new parser after calling bind
+    getState := fun pos => do
+    -- TODO: (Madi) I know fresh needs to be in here (right now it's not getting the correct tag, right?) but I can't figure out how to make it work
+    let memo ← get
+    let tagX : Tag := { id := memo.nextTag }
+    match memo.table[tagX]? with
+    -- Cache hit:
+    | some cachedResults => (sorry : StateT MemoData (ReaderM String) (Std.HashMap Int (μ β)))
+    -- TODO: (Madi)
+    -- Retrieve the results that I got using the current `pos`, cast them from Dynamic back to μ β
+    -- Needed to explicitly name the type of sorry apparently? Because it wouldn't compile otherwise
+    -- Cache miss:
+    | none => sorry
+    -- TODO: (Madi)
+    -- Actually do the computation and cache the results in the table
+  }
 instance [Monad μ] [Alternative μ] : Applicative (Parser μ) where
   -- derived from the Monad laws
   seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
