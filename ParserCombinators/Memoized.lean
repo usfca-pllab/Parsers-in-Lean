@@ -34,14 +34,30 @@ def fresh : Memo Tag := do
   set { memo with nextTag := memo.nextTag + 1 }
   pure ⟨ memo.nextTag ⟩
 
+namespace Std.HashMap
+def unionWith {K V} [BEq K] [Hashable K] (m1 m2 : Std.HashMap K V) (f : V → V → V) : Std.HashMap K V :=
+  m2.fold (fun m k v2 =>
+    match m[k]? with
+    -- Collision case, meshes the two values found into one new value (based on the given function `f`)
+    | some v1 => m.insert k (f v1 v2)
+    -- New key case, juar adds the value we found
+    | none => m.insert k v2) m1
+end Std.HashMap
+
+-- TODO: (Madi) Change if there's a better way to add in lifting capability
+def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α → β → γ) (fa : F α) (fb : F β) : F γ :=
+  f <$> fa <*> fb
+
 -- Some of the α's here should become existential/hidden
-structure Parser (μ : Type -> Type) [Monad μ] (α : Type) where
-  getState : Int -> (StateT MemoData) (ReaderM String) (Std.HashMap Int (μ α))
+structure Parser (μ : Type → Type) [Monad μ] (α : Type) where
+  -- getState : Int -> (StateT MemoData) (ReaderM String) (Std.HashMap Int (μ α))
+  getState : Int → StateT MemoData (ReaderM String) (Std.HashMap Int (μ α))
 
 instance [Monad μ] : Functor (Parser μ) where
   map f x := ⟨ Functor.map (Std.HashMap.map (fun _ => Functor.map f)) ∘ x.getState ⟩
 
 -- N.B. Have to define `pure` separately so that we can use it in `seq`
+-- Defines the ability to create the simplest parser possible
 instance [Monad μ] : Pure (Parser μ) where
   pure a := ⟨fun pos => pure {(pos, pure a)}⟩
 
@@ -50,27 +66,20 @@ instance [Monad μ] : Pure (Parser μ) where
 instance [Monad μ] [Alternative μ] : Bind (Parser μ) where
   bind {α β} x f := {
     -- This is the function that will get us our new parser after calling bind
-    getState := fun pos => do
-    -- TODO: (Madi) I know fresh needs to be in here (right now it's not getting the correct tag, right?) but I can't figure out how to make it work
-    let memo ← get
-    let tagX : Tag := { id := memo.nextTag }
-    match memo.table[tagX]? with
-    -- Cache hit:
-    | some cachedResults => (sorry : StateT MemoData (ReaderM String) (Std.HashMap Int (μ β)))
-    -- TODO: (Madi)
-    -- Retrieve the results that I got using the current `pos`, cast them from Dynamic back to μ β
-    -- Needed to explicitly name the type of sorry apparently? Because it wouldn't compile otherwise
-    -- Cache miss:
-    | none => sorry
-    -- TODO: (Madi)
-    -- Actually do the computation and cache the results in the table
+    getState := fun pos => do sorry
   }
 instance [Monad μ] [Alternative μ] : Applicative (Parser μ) where
   -- derived from the Monad laws
   seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
 
 instance [Monad μ] [Alternative μ] : Alternative (Parser μ) where
-  failure := sorry -- empty in Haskell
-  orElse r1 r2 := sorry -- (<|>) in Haskell but r2 is lazy
+  failure := { getState := fun _ => pure Std.HashMap.empty }
+  orElse r1 r2 := {
+    getState := fun pos =>
+      let s1 := r1.getState pos
+        -- (Madi) we want r2 to be lazy, so I made it of type Thunk (which I just learned about) and used it accordingly
+      let s2 := (r2 ()).getState pos
+      liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
+  }
 
 instance [Monad μ] [Alternative μ] : Monad (Parser μ) where
