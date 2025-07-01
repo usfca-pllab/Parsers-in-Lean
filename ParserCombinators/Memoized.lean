@@ -61,6 +61,7 @@ instance [Monad μ] : Functor (Parser μ) where
 instance [Monad μ] : Pure (Parser μ) where
   pure a := ⟨fun pos => pure {(pos, pure a)}⟩
 
+-- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
 -- might need other type class instances (e.g. to make fold work)
 -- also, you may need to define or find a fold operation for Std.HashMap
 instance [Monad μ] [Alternative μ] : Bind (Parser μ) where
@@ -68,6 +69,8 @@ instance [Monad μ] [Alternative μ] : Bind (Parser μ) where
     -- This is the function that will get us our new parser after calling bind
     getState := fun pos => do sorry
   }
+
+-- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
 instance [Monad μ] [Alternative μ] : Applicative (Parser μ) where
   -- derived from the Monad laws
   seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
@@ -82,4 +85,14 @@ instance [Monad μ] [Alternative μ] : Alternative (Parser μ) where
       liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
   }
 
+-- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
 instance [Monad μ] [Alternative μ] : Monad (Parser μ) where
+
+
+def epsilon [Monad μ] : Parser μ Unit := {
+  getState := fun pos => sorry
+}
+
+def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ Unit := {
+  getState := fun pos => sorry
+}
