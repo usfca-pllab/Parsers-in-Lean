@@ -44,9 +44,11 @@ def unionWith {K V} [BEq K] [Hashable K] (m1 m2 : Std.HashMap K V) (f : V → V 
     | none => m.insert k v2) m1
 end Std.HashMap
 
--- TODO: (Madi) Change if there's a better way to add in lifting capability
 def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α → β → γ) (fa : F α) (fb : F β) : F γ :=
   f <$> fa <*> fb
+
+def joinUnderCache {γ} [Monad μ] [Alternative μ] (s1 s2 : StateT MemoData (ReaderM String) (Std.HashMap Int (μ γ))) : StateT MemoData (ReaderM String) (Std.HashMap Int (μ γ)) :=
+  liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
 
 -- Some of the α's here should become existential/hidden
 structure Parser (μ : Type → Type) [Monad μ] (α : Type) where
@@ -82,7 +84,7 @@ instance [Monad μ] [Alternative μ] : Alternative (Parser μ) where
       let s1 := r1.getState pos
         -- (Madi) we want r2 to be lazy, so I made it of type Thunk (which I just learned about) and used it accordingly
       let s2 := (r2 ()).getState pos
-      liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
+      joinUnderCache s1 s2
   }
 
 -- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
