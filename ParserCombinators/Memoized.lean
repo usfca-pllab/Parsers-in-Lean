@@ -63,21 +63,41 @@ instance [Monad μ] : Functor (Parser μ) where
 instance [Monad μ] : Pure (Parser μ) where
   pure a := ⟨fun pos => pure {(pos, pure a)}⟩
 
--- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
 -- might need other type class instances (e.g. to make fold work)
 -- also, you may need to define or find a fold operation for Std.HashMap
-instance [Monad μ] [Alternative μ] : Bind (Parser μ) where
-  bind {α β} x f := {
+instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Bind (Parser μ) where
+  bind {_ β} x f := {
     -- This is the function that will get us our new parser after calling bind
-    getState := fun pos => do sorry
+    getState := fun pos => do
+    -- Run first parser (`x`) starting at `pos`, results in `pivotToResult`
+    --  (A HashMap with keys that are character indices where x successfully finished
+    -- mapped to the result of that parse (wrapped in μ for failure / ambiguous cases)
+      let pivotToResult ← x.getState pos
+      -- Iterate over every successful parse, turn the map into a list of pairs
+      -- TODO: (Madi) I feel like this step and the step below could be squished into one step
+      -- but this way was clearer for me to figure out,
+      -- so that could be a thing either I work on this coming week, or we do together today
+      let actions : List (StateT MemoData (ReaderM String) (Std.HashMap Int (μ β))) :=
+        pivotToResult.toList.map (fun (j, ma) =>
+          -- TODO: (Madi) This is where the MonadLiftT restraint comes in, because we need to unwrap the value
+          -- from /mu, and I couldn't get Lean to accept it unless I made it have `MonadLiftT`
+          -- but maybe there's another way I don't know about?
+          liftM ma >>= fun a => (f a).getState j
+        )
+      -- Then, we just combine all the results of all the possible paths that the parser can go down
+      -- into one big HashMap, starting with an empty one
+      actions.foldlM
+        (fun acc m => do
+          let m' ← m
+          pure (Std.HashMap.unionWith acc m' (fun v1 v2 => v1 <|> v2)))
+        Std.HashMap.empty
   }
 
--- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
-instance [Monad μ] [Alternative μ] : Applicative (Parser μ) where
+instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Applicative (Parser μ) where
   -- derived from the Monad laws
   seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
 
-instance [Monad μ] [Alternative μ] : Alternative (Parser μ) where
+instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Alternative (Parser μ) where
   failure := { getState := fun _ => pure Std.HashMap.empty }
   orElse r1 r2 := {
     getState := fun pos =>
@@ -87,8 +107,7 @@ instance [Monad μ] [Alternative μ] : Alternative (Parser μ) where
       joinUnderCache s1 s2
   }
 
--- TODO: (Madi) Do we need to add a Foldable restraint, or is that already taken care of?
-instance [Monad μ] [Alternative μ] : Monad (Parser μ) where
+instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Monad (Parser μ) where
 
 
 def epsilon [Monad μ] : Parser μ Unit := {
