@@ -115,3 +115,5 @@ def epsilon [Monad μ] : Parser μ Unit := {
 def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ Unit := {
   getState := fun pos => sorry
 }
+
+def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser μ α) : Parser μ α := sorry
