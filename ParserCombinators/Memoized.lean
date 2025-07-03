@@ -87,9 +87,7 @@ instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM St
       -- Then, we just combine all the results of all the possible paths that the parser can go down
       -- into one big HashMap, starting with an empty one
       actions.foldlM
-        (fun acc m => do
-          let m' ← m
-          pure (Std.HashMap.unionWith acc m' (fun v1 v2 => v1 <|> v2)))
+        (fun acc m => joinUnderCache (pure acc) m)
         Std.HashMap.empty
   }
 
