@@ -67,25 +67,12 @@ instance [Monad μ] : Pure (Parser μ) where
 -- also, you may need to define or find a fold operation for Std.HashMap
 instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Bind (Parser μ) where
   bind {_ β} x f := {
-    -- This is the function that will get us our new parser after calling bind
     getState := fun pos => do
-    -- Run first parser (`x`) starting at `pos`, results in `pivotToResult`
-    --  (A HashMap with keys that are character indices where x successfully finished
-    -- mapped to the result of that parse (wrapped in μ for failure / ambiguous cases)
       let pivotToResult ← x.getState pos
-      -- Iterate over every successful parse, turn the map into a list of pairs
-      -- TODO: (Madi) I feel like this step and the step below could be squished into one step
-      -- but this way was clearer for me to figure out,
-      -- so that could be a thing either I work on this coming week, or we do together today
       let actions : List (StateT MemoData (ReaderM String) (Std.HashMap Int (μ β))) :=
         pivotToResult.toList.map (fun (j, ma) =>
-          -- TODO: (Madi) This is where the MonadLiftT restraint comes in, because we need to unwrap the value
-          -- from /mu, and I couldn't get Lean to accept it unless I made it have `MonadLiftT`
-          -- but maybe there's another way I don't know about?
           liftM ma >>= fun a => (f a).getState j
         )
-      -- Then, we just combine all the results of all the possible paths that the parser can go down
-      -- into one big HashMap, starting with an empty one
       actions.foldlM
         (fun acc m => joinUnderCache (pure acc) m)
         Std.HashMap.empty
@@ -100,7 +87,6 @@ instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM St
   orElse r1 r2 := {
     getState := fun pos =>
       let s1 := r1.getState pos
-        -- (Madi) we want r2 to be lazy, so I made it of type Thunk (which I just learned about) and used it accordingly
       let s2 := (r2 ()).getState pos
       joinUnderCache s1 s2
   }
