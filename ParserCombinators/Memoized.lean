@@ -5,6 +5,8 @@ import Std.Data.DHashMap.Basic
 import Std.Data.HashMap.Basic
 import Std.Data.HashMap.AdditionalOperations
 import Std.Data.HashMap.Lemmas
+import Mathlib.Control.Traversable.Basic
+import Mathlib.Control.Fold
 
 variable { α : Type }  { μ : Type → Type }
 
@@ -65,24 +67,22 @@ instance [Monad μ] : Pure (Parser μ) where
 
 -- might need other type class instances (e.g. to make fold work)
 -- also, you may need to define or find a fold operation for Std.HashMap
-instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Bind (Parser μ) where
+instance [Monad μ] [Alternative μ] [Traversable μ] : Bind (Parser μ) where
   bind {_ β} x f := {
     getState := fun pos => do
       let pivotToResult ← x.getState pos
-      let actions : List (StateT MemoData (ReaderM String) (Std.HashMap Int (μ β))) :=
-        pivotToResult.toList.map (fun (j, ma) =>
-          liftM ma >>= fun a => (f a).getState j
-        )
-      actions.foldlM
-        (fun acc m => joinUnderCache (pure acc) m)
-        Std.HashMap.empty
+      let actions : List (μ (StateT MemoData (ReaderM String) (Std.HashMap Int (μ β)))) :=
+        pivotToResult.toList.map (fun (j, ma) => (fun a => (f a).getState j) <$> ma)
+      actions.foldl
+        (Traversable.foldl joinUnderCache)
+        (pure Std.HashMap.empty)
   }
 
-instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Applicative (Parser μ) where
+instance [Monad μ] [Alternative μ]  [Traversable μ] : Applicative (Parser μ) where
   -- derived from the Monad laws
   seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
 
-instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Alternative (Parser μ) where
+instance [Monad μ] [Alternative μ] [Traversable μ] : Alternative (Parser μ) where
   failure := { getState := fun _ => pure Std.HashMap.empty }
   orElse r1 r2 := {
     getState := fun pos =>
@@ -91,7 +91,7 @@ instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM St
       joinUnderCache s1 s2
   }
 
-instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM String))] : Monad (Parser μ) where
+instance [Monad μ] [Alternative μ] [Traversable μ] : Monad (Parser μ) where
 
 
 def epsilon [Monad μ] : Parser μ Unit := {
@@ -148,3 +148,6 @@ def funcParser : Parser Option String := (fun (_ : Unit) => "matched!") <$> term
 
 -- Alternative (`<|>`)
 def altParser : Parser Option Unit := (terminal "hello" : Parser Option Unit) <|> (terminal "goodbye" : Parser Option Unit)
+
+#guard (runParser (μ := Option) altParser "hello").1.toList == [(5, some PUnit.unit)]
+#guard (runParser (μ := Option) altParser "goodbye").1.toList == [(7, some PUnit.unit)]
