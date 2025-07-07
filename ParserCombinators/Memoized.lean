@@ -135,3 +135,16 @@ def runParser {α : Type} {μ : Type → Type} [Monad μ] (p : Parser μ α) (in
 
 -- Edge case for empty string
 #eval (runParser (μ := Option) (terminal "") "hello world" 6).1
+
+
+-- Testing instances:
+
+-- Functor (`<$>`)
+def funcParser : Parser Option String := (fun (_ : Unit) => "matched!") <$> terminal "hello"
+
+-- TODO: (Madi) Just beef this up by testing edge cases
+#eval (runParser (μ := Option) funcParser "hello world").1
+
+
+-- Alternative (`<|>`)
+def altParser : Parser Option Unit := (terminal "hello" : Parser Option Unit) <|> (terminal "goodbye" : Parser Option Unit)
