@@ -95,11 +95,34 @@ instance [Monad μ] [Alternative μ] [MonadLiftT μ (StateT MemoData (ReaderM St
 
 
 def epsilon [Monad μ] : Parser μ Unit := {
-  getState := fun pos => sorry
+  getState := fun pos => pure {(pos, pure ())}
 }
 
 def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ Unit := {
-  getState := fun pos => sorry
+  getState := fun pos => do
+    let input ← read
+    if pos >= 0 && s.isPrefixOf (input.drop pos.toNat) then
+      let endPos := pos + s.length
+      pure {(endPos, pure ())}
+    else
+      pure Std.HashMap.empty
 }
 
 def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser μ α) : Parser μ α := sorry
+
+
+-- Testing
+
+-- Will use `Option` as the concrete monad (some is success and none is failure)
+
+def runParser {α : Type} {μ : Type → Type} [Monad μ] (p : Parser μ α) (input : String) (pos : Int := 0) : (Std.HashMap Int (μ α)) × MemoData :=
+  let stateTResult := (p.getState pos).run startState
+  let readerResult := stateTResult.run input
+  readerResult
+
+-- Checking to make sure that runParser has correct type
+#check runParser (μ := Option) epsilon "test"
+
+-- Testing running the parsers (had to extract just the hashmap
+-- because Lean couldn't extract a string from the full return type)
+#eval (runParser (μ := Option) (terminal "hello") "hello world").1
