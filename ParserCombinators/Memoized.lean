@@ -126,3 +126,12 @@ def runParser {α : Type} {μ : Type → Type} [Monad μ] (p : Parser μ α) (in
 -- Testing running the parsers (had to extract just the hashmap
 -- because Lean couldn't extract a string from the full return type)
 #eval (runParser (μ := Option) (terminal "hello") "hello world").1
+
+
+#eval (runParser (μ := Option) (terminal "wo") "hello world" 6).1
+
+-- Failure
+#eval (runParser (μ := Option) (terminal "llo") "hello world" 5).1
+
+-- Edge case for empty string
+#eval (runParser (μ := Option) (terminal "") "hello world" 6).1
