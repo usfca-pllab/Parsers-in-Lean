@@ -11,17 +11,17 @@ import Mathlib.Data.Finset.Basic
 import Mathlib.Logic.Relation
 
 universe u v
-variable (α : Type u) (ν : Type v) [DecidableEq α] [DecidableEq ν]
+variable {α : Type u} {ν : Type v} [DecidableEq α] [DecidableEq ν]
 
 -- Symbol
-inductive Symbol where
-  | term    : α -> Symbol
-  | nonterm : ν -> Symbol
+inductive Symbol (α : Type u) (ν : Type v) where
+  | term    : α -> Symbol α ν
+  | nonterm : ν -> Symbol α ν
   deriving DecidableEq, Repr
 
 -- Derivation strings.  Also used as right-hand sides for CFG rules
 @[simp]
-abbrev symbols := List (Symbol α ν)
+abbrev symbols (α : Type u) (ν : Type v) := List (Symbol α ν)
 
 /-
 Context-free grammars.
@@ -67,7 +67,7 @@ abbrev a := of 'a' a_in
 abbrev b := of 'b' b_in
 abbrev c := of 'c' c_in
 
-def my_cfg : CFG my_alphabet my_vars := {
+def my_cfg : @CFG my_alphabet my_vars := {
   start := 1
   rules :=
     let a := of 'a' a_in
@@ -82,7 +82,7 @@ def my_cfg : CFG my_alphabet my_vars := {
 
 -- All possible derivations: a step function
 @[simp]
-def yield {cfg : CFG α ν} (deriv : symbols α ν) : List (symbols α ν) := do
+def yield {cfg : @CFG α ν} (deriv : symbols α ν) : List (symbols α ν) := do
   let init ← List.inits deriv
   let Option.some (List.cons (Symbol.nonterm x) tail) := List.getRest deriv init
     | []  -- eliminate positions that do not start with a variable
@@ -90,31 +90,61 @@ def yield {cfg : CFG α ν} (deriv : symbols α ν) : List (symbols α ν) := do
 
 def my_str : symbols my_alphabet my_vars := [term a, nonterm 1, term c]
 
-#eval my_cfg.yield my_alphabet my_vars my_str
+#eval my_cfg.yield my_str
 
 -- Relation version of the step function
 @[simp]
-def yields {cfg : CFG α ν} (a b : symbols α ν) := b ∈ cfg.yield α ν a
+def yields {cfg : @CFG α ν} (a b : symbols α ν) := b ∈ cfg.yield a
 
-example : my_cfg.yields my_alphabet my_vars [term a, nonterm 1, term c] [term a, term c] := by
+instance {cfg : @CFG α ν} (a b : symbols α ν) : Decidable (cfg.yields a b) :=
+  if h : b ∈ cfg.yield a then isTrue h else isFalse h
+
+example : my_cfg.yields [term a, nonterm 1, term c] [term a, term c] := by
   simp only [yields]
   decide
 
 -- Derives: transitive reflexive closure of yields.
 -- NOTE(maemre): This is potentially noncomputable, might need a step index
 @[simp]
-def derives {cfg : CFG α ν} : (symbols α ν) → (symbols α ν) → Prop :=
-  Relation.ReflTransGen (cfg.yields α ν)
+def derives {cfg : @CFG α ν} : (symbols α ν) → (symbols α ν) → Prop :=
+  Relation.ReflTransGen cfg.yields
 
-example : my_cfg.derives my_alphabet my_vars [term a, nonterm 1, term c] [term a, term a, term c] := by
-  have rel := my_cfg.derives my_alphabet my_vars
-  have x : symbols my_alphabet my_vars := [term a, nonterm 1, term c]
-  have y : symbols my_alphabet my_vars := [term a, nonterm 1, term a, term c]
-  have z : symbols my_alphabet my_vars := [term a, term a, term c]
+example : my_cfg.derives [term a, nonterm 1, term c] [term a, term a, term c] := by
+  -- local defs for convenience
+  let rel := my_cfg.yields
+  let x : symbols my_alphabet my_vars := [term a, nonterm 1, term c]
+  let y : symbols my_alphabet my_vars := [term a, nonterm 1, term a, term c]
+  let z : symbols my_alphabet my_vars := [term a, term a, term c]
+  unfold derives
+  -- `derives` is not decidable, so we have to explicitly give a route.
+  show Relation.ReflTransGen rel x z
+  refine @Relation.ReflTransGen.head (symbols my_alphabet my_vars) rel x y z ?_ ?_
+  · simp only [rel, yields]
+    decide
+  · refine @Relation.ReflTransGen.tail (symbols my_alphabet my_vars) rel y y z Relation.ReflTransGen.refl ?_
+    simp only [rel, yields]
+    decide
+
+-- Indexed version of `derives`
+def derives_nth {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Prop :=
+  v = w ∨ if n > 0 then ∃ u, cfg.yields v u ∧ cfg.derives_nth (n - 1) u w
+          else v = w
+
+example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by
+  -- local defs for convenience
+  let x : symbols my_alphabet my_vars := [term a, nonterm 1, term c]
+  let y : symbols my_alphabet my_vars := [term a, nonterm 1, term a, term c]
+  let z : symbols my_alphabet my_vars := [term a, term a, term c]
+  unfold derives_nth
   simp
-  have nicer : Relation.ReflTransGen rel x z := by
-    refine @Relation.ReflTransGen.head (symbols my_alphabet my_vars) rel x y z ?_ ?_
-    sorry
-    sorry
-  -- simp [rel, x, y, z] at nicer
-  sorry
+  use y
+  constructor
+  · decide
+  · unfold derives_nth
+    right
+    simp only [yields]
+    use z
+    constructor
+    · decide
+    · simp [derives_nth]
+      rfl
