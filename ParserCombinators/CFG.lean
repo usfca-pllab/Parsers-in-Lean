@@ -152,10 +152,37 @@ instance {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Decidable (cfg.der
 example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by decide
 
 private lemma derives_to_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w -> ∃ n : ℕ, cfg.derives_nth n v w := by
-  sorry
+  intro h
+  refine Relation.ReflTransGen.head_induction_on h ?_ ?_
+  · use 0
+    simp [derives_nth]
+  · rintro v u h_yields h_derives ⟨n, ih⟩
+    use n + 1
+    unfold derives_nth
+    right
+    simp only []
+    use u
 
 private lemma derives_from_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : (∃ n : ℕ, cfg.derives_nth n v w) -> cfg.derives v w := by
-  sorry
+  intro ⟨n, h⟩
+  induction n generalizing v with
+  | zero =>
+    simp only [derives_nth, or_self] at h
+    simp only [derives, h]
+    exact Relation.ReflTransGen.refl
+  | succ n' ih =>
+    unfold derives_nth at h
+    simp only [] at h
+    refine Or.by_cases h ?_ ?_
+    · intro h
+      simp only [derives, h]
+      exact Relation.ReflTransGen.refl
+    · intro ⟨u, ⟨h_yields, h_recur⟩⟩
+      unfold derives
+      refine @Relation.ReflTransGen.head (symbols α ν) cfg.yields v u w ?_ ?_
+      · exact h_yields
+      exact ih u h_recur
+
 
 theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w ↔ ∃ n : ℕ, cfg.derives_nth n v w :=
   ⟨derives_to_derives_nth v w, derives_from_derives_nth v w⟩
