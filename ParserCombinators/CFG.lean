@@ -126,25 +126,27 @@ example : my_cfg.derives [term a, nonterm 1, term c] [term a, term a, term c] :=
     decide
 
 -- Indexed version of `derives`
-def derives_nth {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Prop :=
-  v = w ∨ if n > 0 then ∃ u, cfg.yields v u ∧ cfg.derives_nth (n - 1) u w
-          else v = w
+def derives_nth {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Prop := v = w ∨ match n with
+  | 0 => v = w
+  | Nat.succ n' => ∃ u, cfg.yields v u ∧ cfg.derives_nth n' u w
 
-example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by
-  -- local defs for convenience
-  let x : symbols my_alphabet my_vars := [term a, nonterm 1, term c]
-  let y : symbols my_alphabet my_vars := [term a, nonterm 1, term a, term c]
-  let z : symbols my_alphabet my_vars := [term a, term a, term c]
-  unfold derives_nth
-  simp
-  use y
-  constructor
-  · decide
-  · unfold derives_nth
-    right
-    simp only [yields]
-    use z
-    constructor
-    · decide
-    · simp [derives_nth]
-      rfl
+-- Decidable instance for the indexed step relation
+instance {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Decidable (cfg.derives_nth n v w) := by induction n generalizing v with
+  | zero =>
+    unfold derives_nth
+    refine decidable_of_iff (v = w) ?_
+    simp only [or_self]
+  | succ n' ih =>
+    unfold derives_nth
+    if h : v = w then exact isTrue (Or.inl h)
+    else
+      let recur (u : symbols α ν) := cfg.derives_nth n' u w
+      refine decidable_of_iff (∃ u ∈ (cfg.yield v).toFinset, recur u) ?_
+      unfold yields
+      simp only [h, false_or, ↓reduceIte]
+      have h' (u : symbols α ν) := @List.mem_toFinset (symbols α ν) inferInstance (cfg.yield v) u
+      have h'' (p :symbols α ν → Prop) : (∃ u ∈ cfg.yield v, p u) <-> (∃ u ∈ (cfg.yield v).toFinset, p u) := by simp [h']
+      rw [h'' recur]
+
+-- With the `Decidable` instance above, we can *inefficiently* decide bounded instances of the derivation relation.
+example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by decide
