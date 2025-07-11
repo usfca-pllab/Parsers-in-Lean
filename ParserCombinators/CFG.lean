@@ -150,6 +150,8 @@ instance {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Decidable (cfg.der
 
 -- With the `Decidable` instance above, we can *inefficiently* decide bounded instances of the derivation relation.
 example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by decide
+-- this search is really inefficient but it works
+example : my_cfg.derives_nth 5 [term a, nonterm 1, term c] [term a, term a, term a, term a, term c] := by decide
 
 private lemma derives_to_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w -> ∃ n : ℕ, cfg.derives_nth n v w := by
   intro h
