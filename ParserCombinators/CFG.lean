@@ -185,6 +185,66 @@ private lemma derives_from_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) 
       · exact h_yields
       exact ih u h_recur
 
-
 theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w ↔ ∃ n : ℕ, cfg.derives_nth n v w :=
   ⟨derives_to_derives_nth v w, derives_from_derives_nth v w⟩
+
+mutual
+  -- A valid parse tree according to given grammar.  The `Forest` type is explicitly defined rather
+  -- than a nested inductive type so that we can use `map` and `extractHead`.
+  inductive ParseTree (cfg : @CFG α ν) where
+    | mk (n : ν) (children : Forest cfg) (h_lawful : (List.map extractHead children₁) ∈ cfg.rules n) : ParseTree cfg
+  inductive Forest (cfg : @CFG α ν) where
+    | mk : List (ParseTree cfg ⊕ α) → Forest cfg
+end
+
+@[coe,simp]
+def Forest.toList {cfg : @CFG α ν} : Forest cfg → List (ParseTree cfg ⊕ α)
+  | Forest.mk children => children
+
+instance {cfg : @CFG α ν} : Coe (Forest cfg) (List (ParseTree cfg ⊕ α)) where
+  coe := Forest.toList
+
+namespace ParseTree
+
+#check List.sizeOf_lt_of_mem
+
+@[simp]
+def children {cfg : @CFG α ν} : ParseTree cfg → Forest cfg
+  | ParseTree.mk _ children _ => children
+
+@[simp]
+def sizeOf_lt_of_child_forest {cfg : @CFG α ν} {child : ParseTree cfg} {forest : Forest cfg} [SizeOf α] (h_mem : Sum.inl child ∈ forest.toList)
+    : sizeOf child < sizeOf forest := by
+  have h1 : sizeOf child < sizeOf (@Sum.inl (ParseTree cfg) α child) := by
+    simp
+  have h2 : sizeOf (@Sum.inl (ParseTree cfg) α child) < sizeOf forest.toList := by
+    apply @List.sizeOf_lt_of_mem (ParseTree cfg ⊕ α) (Sum.inl child) inferInstance forest h_mem
+  have h3 : sizeOf forest.toList < sizeOf forest := match forest with
+    | Forest.mk children => by
+      simp +arith
+  apply lt_trans h1
+  apply lt_trans h2
+  exact h3
+
+@[simp]
+def sizeOf_lt_of_child {cfg : @CFG α ν} {parent child : ParseTree cfg} [SizeOf α] (h_mem : Sum.inl child ∈ parent.children.toList)
+    : sizeOf child < sizeOf parent := by
+  refine lt_of_lt_of_le (sizeOf_lt_of_child_forest h_mem) ?_
+  exact match parent with
+    | ParseTree.mk _ forest _ => by
+      simp +arith
+
+def extractHead {cfg : @CFG α ν} : ParseTree cfg ⊕ α → Symbol α ν
+  | Sum.inl (ParseTree.mk n _ _) => nonterm n
+  | Sum.inr a => term a
+
+def leaves {cfg : @CFG α ν} (tree : ParseTree cfg) : symbols α ν := match tree with
+  | ParseTree.mk _ forest _ => forest.toList.attach.flatMap (fun
+    | ⟨(Sum.inl node), _h_mem⟩ => leaves node
+    | ⟨Sum.inr a, _⟩ => [term a])
+termination_by tree
+decreasing_by
+  exact sizeOf_lt_of_child _h_mem
+
+
+-- TODO: convert derivation to parse trees
