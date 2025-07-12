@@ -9,6 +9,7 @@ import Batteries.Data.List.Basic
 import Mathlib.Data.List.Monad
 import Mathlib.Data.Finset.Basic
 import Mathlib.Logic.Relation
+import Aesop
 
 universe u v
 variable {α : Type u} {ν : Type v} [DecidableEq α] [DecidableEq ν]
@@ -143,9 +144,9 @@ instance {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Decidable (cfg.der
       let recur (u : symbols α ν) := cfg.derives_nth n' u w
       refine decidable_of_iff (∃ u ∈ (cfg.yield v).toFinset, recur u) ?_
       unfold yields
-      simp only [h, false_or, ↓reduceIte]
+      simp only [h, false_or]
       have h' (u : symbols α ν) := @List.mem_toFinset (symbols α ν) inferInstance (cfg.yield v) u
-      have h'' (p :symbols α ν → Prop) : (∃ u ∈ cfg.yield v, p u) <-> (∃ u ∈ (cfg.yield v).toFinset, p u) := by simp [h']
+      have h'' (p :symbols α ν → Prop) : (∃ u ∈ cfg.yield v, p u) <-> (∃ u ∈ (cfg.yield v).toFinset, p u) := by simp
       rw [h'' recur]
 
 -- With the `Decidable` instance above, we can *inefficiently* decide bounded instances of the derivation relation.
@@ -188,63 +189,199 @@ private lemma derives_from_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) 
 theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w ↔ ∃ n : ℕ, cfg.derives_nth n v w :=
   ⟨derives_to_derives_nth v w, derives_from_derives_nth v w⟩
 
-mutual
-  -- A valid parse tree according to given grammar.  The `Forest` type is explicitly defined rather
-  -- than a nested inductive type so that we can use `map` and `extractHead`.
-  inductive ParseTree (cfg : @CFG α ν) where
-    | mk (n : ν) (children : Forest cfg) (h_lawful : (List.map extractHead children₁) ∈ cfg.rules n) : ParseTree cfg
-  inductive Forest (cfg : @CFG α ν) where
-    | mk : List (ParseTree cfg ⊕ α) → Forest cfg
-end
-
-@[coe,simp]
-def Forest.toList {cfg : @CFG α ν} : Forest cfg → List (ParseTree cfg ⊕ α)
-  | Forest.mk children => children
-
-instance {cfg : @CFG α ν} : Coe (Forest cfg) (List (ParseTree cfg ⊕ α)) where
-  coe := Forest.toList
+-- A parse tree according to given grammar.  It stores which rule is used to build the current node.
+inductive ParseTree (cfg : @CFG α ν) where
+  | mk (n : ν) (rule : {rule // rule ∈ cfg.rules n}) (children : List (ParseTree cfg ⊕ α))
 
 namespace ParseTree
 
-#check List.sizeOf_lt_of_mem
+def my_tree : ParseTree my_cfg := ParseTree.mk 1 ⟨[], by decide⟩ []
 
 @[simp]
-def children {cfg : @CFG α ν} : ParseTree cfg → Forest cfg
-  | ParseTree.mk _ children _ => children
+def children {cfg : @CFG α ν} : ParseTree cfg → List (ParseTree cfg ⊕ α)
+  | ParseTree.mk _ _ children => children
 
 @[simp]
-def sizeOf_lt_of_child_forest {cfg : @CFG α ν} {child : ParseTree cfg} {forest : Forest cfg} [SizeOf α] (h_mem : Sum.inl child ∈ forest.toList)
+def nonterminal {cfg : @CFG α ν} : ParseTree cfg → ν
+  | ParseTree.mk n _ _ => n
+
+@[simp]
+def rule {cfg : @CFG α ν} (tree : ParseTree cfg) : {rule // rule ∈ cfg.rules tree.nonterminal} := match tree with
+  | ParseTree.mk _ rule _ => rule
+
+@[simp]
+def sizeOf_lt_of_child_forest {cfg : @CFG α ν} {child : ParseTree cfg} {forest : List (ParseTree cfg ⊕ α)} [SizeOf α] (h_mem : Sum.inl child ∈ forest)
     : sizeOf child < sizeOf forest := by
   have h1 : sizeOf child < sizeOf (@Sum.inl (ParseTree cfg) α child) := by
     simp
-  have h2 : sizeOf (@Sum.inl (ParseTree cfg) α child) < sizeOf forest.toList := by
+  have h2 : sizeOf (@Sum.inl (ParseTree cfg) α child) < sizeOf forest := by
     apply @List.sizeOf_lt_of_mem (ParseTree cfg ⊕ α) (Sum.inl child) inferInstance forest h_mem
-  have h3 : sizeOf forest.toList < sizeOf forest := match forest with
-    | Forest.mk children => by
-      simp +arith
-  apply lt_trans h1
-  apply lt_trans h2
-  exact h3
+  exact lt_trans h1 h2
 
 @[simp]
-def sizeOf_lt_of_child {cfg : @CFG α ν} {parent child : ParseTree cfg} [SizeOf α] (h_mem : Sum.inl child ∈ parent.children.toList)
+def sizeOf_lt_of_child {cfg : @CFG α ν} {parent child : ParseTree cfg} [SizeOf α] (h_mem : Sum.inl child ∈ parent.children)
     : sizeOf child < sizeOf parent := by
   refine lt_of_lt_of_le (sizeOf_lt_of_child_forest h_mem) ?_
   exact match parent with
     | ParseTree.mk _ forest _ => by
       simp +arith
 
-def extractHead {cfg : @CFG α ν} : ParseTree cfg ⊕ α → Symbol α ν
-  | Sum.inl (ParseTree.mk n _ _) => nonterm n
-  | Sum.inr a => term a
-
 def leaves {cfg : @CFG α ν} (tree : ParseTree cfg) : symbols α ν := match tree with
-  | ParseTree.mk _ forest _ => forest.toList.attach.flatMap (fun
+  | ParseTree.mk _ _ children => children.attach.flatMap (fun
     | ⟨(Sum.inl node), _h_mem⟩ => leaves node
     | ⟨Sum.inr a, _⟩ => [term a])
 termination_by tree
 decreasing_by
   exact sizeOf_lt_of_child _h_mem
 
+#guard leaves my_tree == []
 
--- TODO: convert derivation to parse trees
+def Valid {cfg : @CFG α ν} (tree : ParseTree cfg) : Prop :=
+  tree.rule.val.length = tree.children.length ∧
+  ∀ pair (_h : pair ∈ List.zip tree.rule.val tree.children), match _h_pair : pair, _h with
+    | ⟨Symbol.term a, Sum.inr b⟩, _ => a = b
+    | ⟨Symbol.nonterm n, Sum.inl subtree⟩, _ => n = subtree.nonterminal ∧ subtree.Valid
+    | ⟨Symbol.term _, Sum.inl _⟩, _ => False
+    | ⟨Symbol.nonterm _, Sum.inr _⟩, _ => False
+decreasing_by
+  rename_i h_mem
+  apply List.of_mem_zip at h_mem
+  refine sizeOf_lt_of_child h_mem.right
+
+instance decidable_of_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : Decidable tree.Valid := match h : tree with
+  | ParseTree.mk n rule children => by
+    unfold Valid
+    refine @instDecidableAnd ?_ ?_ ?_ ?_
+    infer_instance
+    let t_pair := Symbol α ν × (ParseTree cfg ⊕ α)
+    let range := List.zip rule.val children
+    let p_pair (pair : t_pair) (_h : pair ∈ range) := match _h_pair : pair, _h with
+      | ⟨Symbol.term a, Sum.inr b⟩, _ => a = b
+      | ⟨Symbol.nonterm n, Sum.inl subtree⟩, _ => n = subtree.nonterminal ∧ subtree.Valid
+      | ⟨Symbol.term _, Sum.inl _⟩, _ => False
+      | ⟨Symbol.nonterm _, Sum.inr _⟩, _ => False
+    let range_ms := Multiset.ofList range
+    have dummy (h : ∀ (pair : t_pair) (_h : pair ∈ range), p_pair pair _h) : (∀ (pair : t_pair) (_h : pair ∈ range), p_pair pair _h) := h
+    simp only [ParseTree.rule, ParseTree.children]
+    refine @decidable_of_iff' ?_ (∀ (pair : t_pair) (_h : pair ∈ range), p_pair pair _h) ?_ ?_
+    · dsimp [t_pair, range, p_pair]
+      dsimp [t_pair, range, p_pair] at dummy
+      constructor
+        -- the rest of the proof until the next `refine` subgoal (that is, the arms of this
+        -- `constructor` tactic) is generated by Aesop. This proof is pretty mechanical.  Although
+        -- the two terms we used are syntactically identical, Lean did not unify them, so we are
+        -- using the Aesop-generated proof.
+      · intro fu pair _h
+        replace fu := fu pair _h
+        subst h
+        simp_all only [Prod.forall, Sum.forall, implies_true, and_self]
+        obtain ⟨val, property⟩ := rule
+        obtain ⟨fst, snd⟩ := pair
+        simp_all only [symbols]
+        cases snd with
+        | inl val_1 =>
+          split
+          next a b x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
+          next n_1 subtree x _h_1 heq
+            heq_1 =>
+            simp_all only [Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only [and_self]
+          next a val_2 x _h_1 heq
+            heq_1 =>
+            simp_all only [Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only
+          next a val_2 x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
+        | inr val_2 =>
+          split
+          next a b x _h_1 heq heq_1 =>
+            simp_all only [Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only
+          next n_1 subtree x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
+          next a val_1 x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
+          next a val_1 x _h_1 heq
+            heq_1 =>
+            simp_all only [Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only
+      · intro fu pair _h
+        replace fu := fu pair _h
+        subst h
+        simp_all only [Prod.forall, Sum.forall, implies_true, and_self]
+        obtain ⟨val, property⟩ := rule
+        obtain ⟨fst, snd⟩ := pair
+        simp_all only [symbols]
+        cases snd with
+        | inl val_1 =>
+          split
+          next a b x _h_1 heq heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
+          next n_1 subtree x _h_1 heq
+            heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
+            simp_all only [symbols, nonterminal, rule, ParseTree.children]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only [and_self]
+          next a val_2 x _h_1 heq
+            heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
+            simp_all only [symbols, nonterminal, rule, ParseTree.children]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only
+          next a val_2 x _h_1 heq heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
+        | inr val_2 =>
+          split
+          next a b x _h_1 heq
+            heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
+            simp_all only [symbols, nonterminal, rule, ParseTree.children]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only
+          next n_1 subtree x _h_1 heq heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
+          next a val_1 x _h_1 heq heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
+          next a val_1 x _h_1 heq
+            heq_1 =>
+            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
+            simp_all only [symbols, nonterminal, rule, ParseTree.children]
+            obtain ⟨left, right⟩ := heq
+            subst right left
+            simp_all only
+
+
+    · refine @Multiset.decidableDforallMultiset t_pair range_ms p_pair ?_
+      intro pair
+      match h_pair : pair with
+        | ⟨Symbol.term a, Sum.inr b⟩ =>
+            simp [p_pair]
+            infer_instance
+        | ⟨Symbol.nonterm n, Sum.inl subtree⟩ =>
+            simp [p_pair]
+            intro h_mem_ms
+            refine @instDecidableAnd ?_ ?_ ?_ ?_
+            · infer_instance
+            · have h_mem : Sum.inl subtree ∈ children := by {
+                replace h_mem_ms : (nonterm n, Sum.inl subtree) ∈ range :=  h_mem_ms
+                apply List.of_mem_zip at h_mem_ms
+                exact h_mem_ms.right
+              }
+              exact decidable_of_Valid
+        | ⟨Symbol.term _, Sum.inl _⟩ => simp [p_pair] ; infer_instance
+        | ⟨Symbol.nonterm _, Sum.inr _⟩ => simp [p_pair] ; infer_instance
+decreasing_by
+  exact sizeOf_lt_of_child h_mem
+    -- refine @decidable_of_iff' (∀ p ∈ range, p_pair p) (List.Forall p_pair range) (Iff.symm $ @List.forall_iff_forall_mem t_pair p_pair range) ?_
+    -- refine @List.instDecidablePredForall (Symbol α ν × (ParseTree cfg ⊕ α)) ?_ ?_ ?_
+
+end ParseTree
