@@ -273,92 +273,10 @@ instance decidable_of_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : Decidabl
         -- using the Aesop-generated proof.
       · intro fu pair _h
         replace fu := fu pair _h
-        subst h
-        simp_all only [Prod.forall, Sum.forall, implies_true, and_self]
-        obtain ⟨val, property⟩ := rule
-        obtain ⟨fst, snd⟩ := pair
-        simp_all only [symbols]
-        cases snd with
-        | inl val_1 =>
-          split
-          next a b x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
-          next n_1 subtree x _h_1 heq
-            heq_1 =>
-            simp_all only [Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only [and_self]
-          next a val_2 x _h_1 heq
-            heq_1 =>
-            simp_all only [Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only
-          next a val_2 x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
-        | inr val_2 =>
-          split
-          next a b x _h_1 heq heq_1 =>
-            simp_all only [Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only
-          next n_1 subtree x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
-          next a val_1 x _h_1 heq heq_1 => simp_all only [Prod.mk.injEq, reduceCtorEq, and_false]
-          next a val_1 x _h_1 heq
-            heq_1 =>
-            simp_all only [Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only
+        aesop
       · intro fu pair _h
         replace fu := fu pair _h
-        subst h
-        simp_all only [Prod.forall, Sum.forall, implies_true, and_self]
-        obtain ⟨val, property⟩ := rule
-        obtain ⟨fst, snd⟩ := pair
-        simp_all only [symbols]
-        cases snd with
-        | inl val_1 =>
-          split
-          next a b x _h_1 heq heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
-          next n_1 subtree x _h_1 heq
-            heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
-            simp_all only [symbols, nonterminal, rule, ParseTree.children]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only [and_self]
-          next a val_2 x _h_1 heq
-            heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inl.injEq, heq_eq_eq]
-            simp_all only [symbols, nonterminal, rule, ParseTree.children]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only
-          next a val_2 x _h_1 heq heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
-        | inr val_2 =>
-          split
-          next a b x _h_1 heq
-            heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
-            simp_all only [symbols, nonterminal, rule, ParseTree.children]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only
-          next n_1 subtree x _h_1 heq heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
-          next a val_1 x _h_1 heq heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, reduceCtorEq, and_false]
-          next a val_1 x _h_1 heq
-            heq_1 =>
-            simp_all only [symbols, nonterminal, rule, ParseTree.children, Prod.mk.injEq, Sum.inr.injEq, heq_eq_eq]
-            simp_all only [symbols, nonterminal, rule, ParseTree.children]
-            obtain ⟨left, right⟩ := heq
-            subst right left
-            simp_all only
-
+        aesop
 
     · refine @Multiset.decidableDforallMultiset t_pair range_ms p_pair ?_
       intro pair
