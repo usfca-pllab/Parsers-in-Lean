@@ -10,6 +10,8 @@ package "ParserCombinators" where
 
 require "leanprover-community" / "mathlib"
 
+require aesop from git "https://github.com/leanprover-community/aesop"
+
 @[default_target]
 lean_lib «ParserCombinators» where
   -- add any library configuration options here
