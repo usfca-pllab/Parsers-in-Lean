@@ -190,73 +190,76 @@ theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.d
   ⟨derives_to_derives_nth v w, derives_from_derives_nth v w⟩
 
 -- A parse tree according to given grammar.  It stores which rule is used to build the current node.
-inductive ParseTree (cfg : @CFG α ν) where
-  | mk (n : ν) (rule : {rule // rule ∈ cfg.rules n}) (children : List (ParseTree cfg ⊕ α))
+inductive ParseTree (cfg : @CFG α ν) : Type ((max u v) + 1) where
+  | Leaf (t : α)
+  | Node (n : ν) (rule : {rule // rule ∈ cfg.rules n}) (children : List (ParseTree cfg))
 
 namespace ParseTree
 
-def my_tree : ParseTree my_cfg := ParseTree.mk 1 ⟨[], by decide⟩ []
+def my_tree : ParseTree my_cfg := ParseTree.Node 1 ⟨[], by decide⟩ []
 
 @[simp]
-def children {cfg : @CFG α ν} : ParseTree cfg → List (ParseTree cfg ⊕ α)
-  | ParseTree.mk _ _ children => children
+def children {cfg : @CFG α ν} : ParseTree cfg → List (ParseTree cfg)
+  | ParseTree.Node _ _ children => children
+  | ParseTree.Leaf _ => []
 
 @[simp]
-def nonterminal {cfg : @CFG α ν} : ParseTree cfg → ν
-  | ParseTree.mk n _ _ => n
+def nonterminal {cfg : @CFG α ν} : ParseTree cfg → Option ν
+  | ParseTree.Node n _ _ => n
+  | ParseTree.Leaf _ => none
 
 @[simp]
-def rule {cfg : @CFG α ν} (tree : ParseTree cfg) : {rule // rule ∈ cfg.rules tree.nonterminal} := match tree with
-  | ParseTree.mk _ rule _ => rule
-
-@[simp]
-def sizeOf_lt_of_child_forest {cfg : @CFG α ν} {child : ParseTree cfg} {forest : List (ParseTree cfg ⊕ α)} [SizeOf α] (h_mem : Sum.inl child ∈ forest)
+def sizeOf_lt_of_child_forest {cfg : @CFG α ν} {child : ParseTree cfg} {forest : List (ParseTree cfg)} [SizeOf α] (h_mem : child ∈ forest)
     : sizeOf child < sizeOf forest := by
-  have h1 : sizeOf child < sizeOf (@Sum.inl (ParseTree cfg) α child) := by
-    simp
-  have h2 : sizeOf (@Sum.inl (ParseTree cfg) α child) < sizeOf forest := by
-    apply @List.sizeOf_lt_of_mem (ParseTree cfg ⊕ α) (Sum.inl child) inferInstance forest h_mem
-  exact lt_trans h1 h2
+  exact @List.sizeOf_lt_of_mem (ParseTree cfg) child inferInstance forest h_mem
 
 @[simp]
-def sizeOf_lt_of_child {cfg : @CFG α ν} {parent child : ParseTree cfg} [SizeOf α] (h_mem : Sum.inl child ∈ parent.children)
-    : sizeOf child < sizeOf parent := by
-  refine lt_of_lt_of_le (sizeOf_lt_of_child_forest h_mem) ?_
-  exact match parent with
-    | ParseTree.mk _ forest _ => by
-      simp +arith
+def sizeOf_lt_of_child {cfg : @CFG α ν} {parent child : ParseTree cfg} [SizeOf α] (h_mem : child ∈ parent.children)
+    : sizeOf child < sizeOf parent := match parent with
+    | ParseTree.Node _ _ children => by
+        simp_all only [ParseTree.children, Node.sizeOf_spec]
+        apply Nat.lt_add_left
+        exact (sizeOf_lt_of_child_forest h_mem)
+    | ParseTree.Leaf _ => by simp at h_mem
+
 
 def leaves {cfg : @CFG α ν} (tree : ParseTree cfg) : symbols α ν := match tree with
-  | ParseTree.mk _ _ children => children.attach.flatMap (fun
-    | ⟨(Sum.inl node), _h_mem⟩ => leaves node
-    | ⟨Sum.inr a, _⟩ => [term a])
+  | ParseTree.Leaf a => [term a]
+  | ParseTree.Node _ _ children => children.attach.flatMap (fun ⟨node, _h_mem⟩ => leaves node)
 termination_by tree
 decreasing_by
   exact sizeOf_lt_of_child _h_mem
 
 #guard leaves my_tree == []
 
-def Valid {cfg : @CFG α ν} (tree : ParseTree cfg) : Prop :=
-  tree.rule.val.length = tree.children.length ∧
-  ∀ pair (_h : pair ∈ List.zip tree.rule.val tree.children), match _h_pair : pair, _h with
-    | ⟨Symbol.term a, Sum.inr b⟩, _ => a = b
-    | ⟨Symbol.nonterm n, Sum.inl subtree⟩, _ => n = subtree.nonterminal ∧ subtree.Valid
+def Valid {cfg : @CFG α ν} (tree : ParseTree cfg) : Prop := match tree with
+  | Leaf _ => True
+  | Node n rule children => rule.val.length = children.length ∧
+  ∀ pair (_h : pair ∈ List.zip rule.val children), match _h_pair : pair, _h with
+    | ⟨Symbol.term a, Leaf b⟩, _ => a = b
+    | ⟨Symbol.nonterm n, subtree@_h:(Node n' _ _)⟩, _ => n = n' ∧ subtree.Valid
     | _, _ => False
 decreasing_by
   rename_i h_mem
   apply List.of_mem_zip at h_mem
-  refine sizeOf_lt_of_child h_mem.right
+  unfold namedPattern at h_mem
+  rw [<- _h] at h_mem
+  exact sizeOf_lt_of_child h_mem.right
 
 -- Boolean version of `Valid`, used for decidability.
-def valid {cfg : @CFG α ν} (tree : ParseTree cfg) : Bool :=
-  tree.rule.val.length == tree.children.length && (List.zip tree.rule.val tree.children).attach.all (fun pair =>
-  match pair with
-    | ⟨(Symbol.term a, Sum.inr b), _⟩ => a = b
-    | ⟨(Symbol.nonterm n, Sum.inl subtree), _⟩ => n = subtree.nonterminal && subtree.valid
+def valid {cfg : @CFG α ν} (tree : ParseTree cfg) : Bool := match tree with
+  | Leaf _ => True
+  | Node n rule children => rule.val.length = children.length &&
+  (List.zip rule.val children).attach.all (fun
+    | ⟨(Symbol.term a, Leaf b), _⟩ => a == b
+    | ⟨(Symbol.nonterm n, subtree@_h:(Node n' _ _)), _⟩ => n = n' && subtree.valid
     | _ => false)
 decreasing_by
   rename_i h_mem
-  exact sizeOf_lt_of_child (List.of_mem_zip h_mem).right
+  apply List.of_mem_zip at h_mem
+  unfold namedPattern at h_mem
+  rw [<- _h] at h_mem
+  exact sizeOf_lt_of_child h_mem.right
 
 #guard my_tree.valid
 
@@ -267,28 +270,30 @@ lemma lift_forall {α} {p q : α → Prop} (h : ∀ x, p x ↔ q x) : (∀ x, p 
         (iff_self (∀ (x : α), q x)))
 
 lemma valid_eq_true_iff_valid {cfg : @CFG α ν} {tree : ParseTree cfg} : tree.valid = true ↔ tree.Valid := match h : tree with
-  | ParseTree.mk n rule children => by {
+  | ParseTree.Leaf _ => by unfold valid Valid ; decide
+  | ParseTree.Node n rule children => by {
     unfold valid Valid
     subst h
     simp_all [symbols]
     intro h_eq_len
     apply lift_forall
     intro a
-    refine and_congr ?_ ?_
-    · repeat (apply lift_forall ; intro)
-      rename_i subtree h_mem
-      cases a with
-      | nonterm => simp [(@valid_eq_true_iff_valid cfg subtree)]
-      | term => simp
-    · repeat (apply lift_forall ; intro)
-      rename_i t h_mem
-      cases a with
-      | nonterm => simp
-      | term => simp
+    repeat (apply lift_forall ; intro)
+    rename_i subtree h_mem
+    match a, h : subtree with
+    | nonterm _, Node _ _ _ =>
+        have h' := @valid_eq_true_iff_valid cfg subtree
+        rw [h] at h'
+        simp [h']
+    | nonterm _, Leaf _ => simp
+    | term _, Node _ _ _ => simp
+    | term _, Leaf _ => simp
   }
 termination_by tree
 decreasing_by
-  exact sizeOf_lt_of_child (List.of_mem_zip h_mem).right
+  apply List.of_mem_zip at h_mem
+  rw [h]
+  exact sizeOf_lt_of_child h_mem.right
 
 instance decidable_of_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : Decidable tree.Valid :=
   decidable_of_iff (tree.valid = true) valid_eq_true_iff_valid
