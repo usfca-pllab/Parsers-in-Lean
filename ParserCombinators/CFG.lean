@@ -9,6 +9,7 @@ import Batteries.Data.List.Basic
 import Mathlib.Data.List.Monad
 import Mathlib.Data.Finset.Basic
 import Mathlib.Logic.Relation
+import ParserCombinators.Util
 import Aesop
 
 universe u v
@@ -113,56 +114,11 @@ theorem yields_of_cons {cfg : @CFG α ν} (σ : Symbol α ν) (v w : symbols α 
   obtain ⟨a, h₁, h₂⟩ := h
   right
   use a
-  simp [h₁, List.getRest]
+  simp [h₁]
   split at h₂
   · simp at h₂
     simp [h₂]
   · simp at h₂
-
-@[simp]
-private lemma getRest_append_right (x y z a : List α) (h : a <+: x) (h' : List.getRest x a = some y)
-    : List.getRest (x ++ z) a = some (y ++ z) := by
-  induction x generalizing a
-  · apply List.prefix_nil.mp at h
-    subst h
-    simp_all [List.getRest]
-  · unfold List.getRest
-    unfold List.getRest at h'
-    split at h'
-    · simp_all
-    · contradiction
-    · simp_all
-
-@[simp]
-private lemma getRest_elim_prefix (x y a : List α) : List.getRest (x ++ y) (x ++ a) = List.getRest y a := by
-  induction x
-  · simp
-  · rename_i head tail ih
-    rw [List.getRest.eq_def]
-    simp [ih]
-
-@[simp]
-private lemma getRest_cons (x : α) (y a : List α) : List.getRest (x :: y) (x :: a) = List.getRest y a := by
-    rw [List.getRest.eq_def]
-    simp
-
-@[simp]
-private lemma getRest_append_left (x y z a : List α) (h : a <+: x) (h' : List.getRest x a = some y)
-    : List.getRest (z ++ x) (z ++ a) = some y := by
-  induction z generalizing y
-  · simp only [List.nil_append]
-    exact h'
-  · rename_i head tail ih
-    unfold List.getRest
-    unfold List.getRest at h'
-    split at h'
-    · simp_all only [List.nil_prefix, List.append_nil, Option.some.injEq, List.cons_append, ↓reduceIte, List.getRest]
-    · contradiction
-    · simp_all only [List.cons_append, Option.ite_none_right_eq_some]
-      rename_i l y' l₁
-      have h'' := ih y
-      simp only [List.getRest, ↓reduceIte, h'.right, forall_const] at h''
-      simp only [h'', and_self]
 
 theorem yields_of_append_left {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w)
     : cfg.yields (v₁ ++ v₂) (w ++ v₂) := by
@@ -511,9 +467,16 @@ theorem derives_of_Valid_tree {cfg : @CFG α ν} {tree : ParseTree cfg} (h : tre
       simp [List.getRest, property]
     · simp only [symbols, leaves, List.flatMap_subtype, List.unattach_attach]
       have derives_of_children (subtree : ParseTree cfg) (a : Symbol α ν) (h_mem : (a, subtree) ∈ (List.zip rule children))
-          : cfg.derives [subtree.root] (subtree.leaves.map term)
+          : cfg.derives [a] (subtree.leaves.map term)
         := by {
+          have subtree_root_eq_symbol : subtree.root = a := by
+            have helper := h_recur a subtree h_mem
+            split at helper
+            · simp_all
+            · simp_all
+            · simp_all
           replace h_recur := h_recur a subtree h_mem
+          rw [<- subtree_root_eq_symbol]
           apply derives_of_Valid_tree
           unfold Valid
           cases h_subtree : subtree
@@ -529,10 +492,28 @@ theorem derives_of_Valid_tree {cfg : @CFG α ν} {tree : ParseTree cfg} (h : tre
               simp [h_recur]
       }
 
-      -- TODO(maemre): use `derives_of_append` to build the leaves from each symbol in the rhs of the rule
-      sorry
-
-
+      simp at h_len
+      clear h_recur property
+      induction h : rule.zip children generalizing rule children with
+      | nil =>
+        replace h := zip_eq_nil_of_eq_length h_len h
+        simp [h]
+        exact Relation.ReflTransGen.refl
+      | cons head tail ih =>
+        obtain ⟨symbol, subtree⟩ := head
+        obtain ⟨symbols, trees, h_rule, h_children, h_tail⟩ := List.zip_eq_cons_iff.mp h
+        subst h_rule h_children
+        simp only [List.length_cons, Nat.add_right_cancel_iff] at h_len
+        obtain ih' := by
+          refine ih trees symbols h_len ?_ (symm h_tail)
+          · intro subtree symbol h_mem
+            refine derives_of_children subtree symbol ?_
+            simp [h_mem]
+        rw [List.flatMap_cons, List.map_append, <- List.singleton_append]
+        refine derives_of_append ?_ ?_
+        · refine derives_of_children subtree symbol ?_
+          simp
+        · exact ih'
   }
 termination_by tree
 decreasing_by
