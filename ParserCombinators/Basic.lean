@@ -75,7 +75,6 @@ def or_parser  (p1 : Parser a) (p2 : Parser a) : Parser a where
           | none => none
   decreases := by {
     intro s result
-    simp
     intro h
     cases h1 : p1.run s
     · cases h2 : p2.run s
@@ -270,9 +269,9 @@ def map  (f : a -> b) (p : Parser a) : Parser b where
   decreases := by {
     intro s result
     cases h : p.run s with
-    | none => simp [h]
+    | none => simp
     | some pair =>
-      simp only [Option.some.injEq, h]
+      simp only [Option.some.injEq]
       intro h_snd
       rw [← h_snd]
       simp [p.decreases s pair h]
@@ -341,7 +340,7 @@ theorem many_run_decreases (p : Parser a) (h : not_nullable p) : ∀ (s : Str) (
     simp [h_recur] at h_many
     have h' := (p.decreases s (v, rest)) h_run
     simp at h'
-    simp [<- h_many, h']
+    simp [<- h_many]
 
     -- induce on `rest`
     rw [many_run] at h_recur
