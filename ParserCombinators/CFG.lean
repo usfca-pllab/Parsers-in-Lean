@@ -82,7 +82,7 @@ def my_cfg : @CFG my_alphabet my_vars := {
 #check my_cfg.rules
 
 -- All possible derivations: a step function
-@[simp]
+@[simp, aesop unsafe]
 def yield {cfg : @CFG α ν} (deriv : symbols α ν) : List (symbols α ν) := do
   let init ← List.inits deriv
   let Option.some (List.cons (Symbol.nonterm x) tail) := List.getRest deriv init
@@ -94,7 +94,7 @@ def my_str : symbols my_alphabet my_vars := [term a, nonterm 1, term c]
 #eval my_cfg.yield my_str
 
 -- Relation version of the step function
-@[simp]
+@[simp, aesop unsafe]
 def yields {cfg : @CFG α ν} (a b : symbols α ν) := b ∈ cfg.yield a
 
 instance {cfg : @CFG α ν} (a b : symbols α ν) : Decidable (cfg.yields a b) :=
@@ -104,9 +104,142 @@ example : my_cfg.yields [term a, nonterm 1, term c] [term a, term c] := by
   simp only [yields]
   decide
 
+theorem yields_not_empty {cfg : @CFG α ν} {w : symbols α ν} (h : cfg.yields [] w) : False := by
+  simp [yields, List.getRest] at h
+
+theorem yields_of_cons {cfg : @CFG α ν} (σ : Symbol α ν) (v w : symbols α ν) (h : cfg.yields v w)
+  : cfg.yields (σ :: v) (σ :: w) := by
+  simp_all
+  obtain ⟨a, h₁, h₂⟩ := h
+  right
+  use a
+  simp [h₁, List.getRest]
+  split at h₂
+  · simp at h₂
+    simp [h₂]
+  · simp at h₂
+
+@[simp]
+private lemma getRest_append_right (x y z a : List α) (h : a <+: x) (h' : List.getRest x a = some y)
+    : List.getRest (x ++ z) a = some (y ++ z) := by
+  induction x generalizing a
+  · apply List.prefix_nil.mp at h
+    subst h
+    simp_all [List.getRest]
+  · unfold List.getRest
+    unfold List.getRest at h'
+    split at h'
+    · simp_all
+    · contradiction
+    · simp_all
+
+@[simp]
+private lemma getRest_elim_prefix (x y a : List α) : List.getRest (x ++ y) (x ++ a) = List.getRest y a := by
+  induction x
+  · simp
+  · rename_i head tail ih
+    rw [List.getRest.eq_def]
+    simp [ih]
+
+@[simp]
+private lemma getRest_cons (x : α) (y a : List α) : List.getRest (x :: y) (x :: a) = List.getRest y a := by
+    rw [List.getRest.eq_def]
+    simp
+
+@[simp]
+private lemma getRest_append_left (x y z a : List α) (h : a <+: x) (h' : List.getRest x a = some y)
+    : List.getRest (z ++ x) (z ++ a) = some y := by
+  induction z generalizing y
+  · simp only [List.nil_append]
+    exact h'
+  · rename_i head tail ih
+    unfold List.getRest
+    unfold List.getRest at h'
+    split at h'
+    · simp_all only [List.nil_prefix, List.append_nil, Option.some.injEq, List.cons_append, ↓reduceIte, List.getRest]
+    · contradiction
+    · simp_all only [List.cons_append, Option.ite_none_right_eq_some]
+      rename_i l y' l₁
+      have h'' := ih y
+      simp only [List.getRest, ↓reduceIte, h'.right, forall_const] at h''
+      simp only [h'', and_self]
+
+theorem yields_of_append_left {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w)
+    : cfg.yields (v₁ ++ v₂) (w ++ v₂) := by
+  induction v₁ generalizing v₂ w
+  · apply yields_not_empty at h
+    contradiction
+
+  · rename_i head tail ih
+    repeat rewrite [List.cons_append]
+    simp_all [List.getRest]
+    cases h
+    · rename_i h
+      cases head with
+      | term t =>
+        simp at h
+      | nonterm n =>
+        left
+        simp_all
+        obtain ⟨a, h₁, h₂⟩ := h
+        use a
+        subst h₂
+        simp_all only [List.append_assoc, and_self]
+    · rename_i h
+      obtain ⟨a, h₁, h₂⟩ := h
+      right
+      left
+      use a
+      simp [*]
+      split at h₂
+      · simp at h₂
+        obtain ⟨a, h₂⟩ := h₂
+        simp_all
+        use a
+        simp_all only [true_and]
+        obtain ⟨left, right⟩ := h₂
+        subst right
+        simp_all only [List.cons_append, List.append_assoc]
+      · simp at h₂
+
+theorem yields_of_append_right {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w)
+    : cfg.yields (v₂ ++ v₁) (v₂ ++ w) := by
+  induction v₂
+  · simp [-yields, h]
+  · rename_i head tail ih
+    simp
+    right
+    simp at ih
+    obtain ⟨a, ih⟩ := ih
+    split at ih
+    · rename_i ih
+      obtain ⟨h₁, h₂⟩ := ih
+      left
+      use a
+      simp_all only [true_and, List.mem_map]
+      obtain ⟨rule, h₂⟩ := h₂
+      use rule
+      simp [h₂]
+    · rename_i ih
+      obtain ⟨h₁, h₂⟩ := ih
+      contradiction
+    · rename_i ih
+      obtain ⟨a, h₁, h₂⟩ := ih
+      right
+      use (head :: a)
+      simp_all only [yields, symbols, yield, List.append_assoc, List.map_eq_map,
+        List.bind_eq_flatMap, List.mem_flatMap, List.mem_inits, getRest_cons, List.cons_append]
+      constructor
+      · rw [<- List.map_tail, List.mem_map]
+        rw [<- List.map_tail, List.mem_map] at h₁
+        simp [h₁]
+      · split at h₂
+        · simp_all
+        · contradiction
+
 -- Derives: transitive reflexive closure of yields.
 -- NOTE(maemre): This is potentially noncomputable, might need a step index
-@[simp]
+@[simp, aesop unsafe]
 def derives {cfg : @CFG α ν} : (symbols α ν) → (symbols α ν) → Prop :=
   Relation.ReflTransGen cfg.yields
 
@@ -152,9 +285,9 @@ instance {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Decidable (cfg.der
 -- With the `Decidable` instance above, we can *inefficiently* decide bounded instances of the derivation relation.
 example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by decide
 -- this search is really inefficient but it works
-example : my_cfg.derives_nth 5 [term a, nonterm 1, term c] [term a, term a, term a, term a, term c] := by decide
+-- example : my_cfg.derives_nth 5 [term a, nonterm 1, term c] [term a, term a, term a, term a, term c] := by decide
 
-private lemma derives_to_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w -> ∃ n : ℕ, cfg.derives_nth n v w := by
+private lemma derives_nth_of_derives {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w -> ∃ n : ℕ, cfg.derives_nth n v w := by
   intro h
   refine Relation.ReflTransGen.head_induction_on h ?_ ?_
   · use 0
@@ -166,7 +299,7 @@ private lemma derives_to_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : 
     simp only []
     use u
 
-private lemma derives_from_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : (∃ n : ℕ, cfg.derives_nth n v w) -> cfg.derives v w := by
+private lemma derives_of_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : (∃ n : ℕ, cfg.derives_nth n v w) -> cfg.derives v w := by
   intro ⟨n, h⟩
   induction n generalizing v with
   | zero =>
@@ -187,7 +320,36 @@ private lemma derives_from_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) 
       exact ih u h_recur
 
 theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w ↔ ∃ n : ℕ, cfg.derives_nth n v w :=
-  ⟨derives_to_derives_nth v w, derives_from_derives_nth v w⟩
+  ⟨derives_nth_of_derives v w, derives_of_derives_nth v w⟩
+
+theorem derives_empty_of_empty  {cfg : @CFG α ν} {w : symbols α ν} (h₁ : cfg.derives [] w) : w = [] := by
+  simp [derives] at h₁
+  induction h₁ with
+  | refl => rfl
+  | tail _ h_yields h_empty =>
+      subst h_empty
+      simp [List.getRest] at h_yields
+
+theorem derives_of_append_left {cfg : @CFG α ν} {v₁ v₂ w : symbols α ν} (h : cfg.derives v₁ w)
+    : cfg.derives (v₁ ++ v₂) (w ++ v₂) := by
+  refine Relation.ReflTransGen.head_induction_on h ?_ ?_
+  · exact Relation.ReflTransGen.refl
+  · intro v u h_yields h_tail ih
+    apply yields_of_append_left at h_yields
+    exact Relation.ReflTransGen.head h_yields ih
+
+theorem derives_of_append_right {cfg : @CFG α ν} {v₁ v₂ w : symbols α ν} (h : cfg.derives v₂ w)
+    : cfg.derives (v₁ ++ v₂) (v₁ ++ w) := by
+  refine Relation.ReflTransGen.head_induction_on h ?_ ?_
+  · exact Relation.ReflTransGen.refl
+  · intro v u h_yields h_tail ih
+    apply yields_of_append_right at h_yields
+    exact Relation.ReflTransGen.head h_yields ih
+
+theorem derives_of_append {cfg : @CFG α ν} {v₁ v₂ w₁ w₂ : symbols α ν} (h₁ : cfg.derives v₁ w₁) (h₂ : cfg.derives v₂ w₂)
+    : cfg.derives (v₁ ++ v₂) (w₁ ++ w₂) := by
+  exact Relation.ReflTransGen.trans (derives_of_append_left h₁) (derives_of_append_right h₂)
+
 
 -- A parse tree according to given grammar.  It stores which rule is used to build the current node.
 inductive ParseTree (cfg : @CFG α ν) : Type ((max u v) + 1) where
@@ -196,7 +358,13 @@ inductive ParseTree (cfg : @CFG α ν) : Type ((max u v) + 1) where
 
 namespace ParseTree
 
-def my_tree : ParseTree my_cfg := ParseTree.Node 1 ⟨[], by decide⟩ []
+def my_tree₁ : ParseTree my_cfg := Node 1 ⟨[], by decide⟩ []
+def my_tree₂ : ParseTree my_cfg := Leaf a
+def my_tree₃ : ParseTree my_cfg := Node 1 ⟨[nonterm 1, term a], by decide⟩ [
+  Node 1 ⟨[nonterm 1, term a], by decide⟩ [
+    my_tree₁, Leaf a
+  ],
+  Leaf a]
 
 @[simp]
 def children {cfg : @CFG α ν} : ParseTree cfg → List (ParseTree cfg)
@@ -204,9 +372,29 @@ def children {cfg : @CFG α ν} : ParseTree cfg → List (ParseTree cfg)
   | ParseTree.Leaf _ => []
 
 @[simp]
-def nonterminal {cfg : @CFG α ν} : ParseTree cfg → Option ν
+def isNode {cfg : @CFG α ν} : (ParseTree cfg) → Bool
+  | Node _ _ _ => true
+  | Leaf _ => false
+
+@[simp]
+def isLeaf {cfg : @CFG α ν} : (ParseTree cfg) → Bool
+  | Node _ _ _ => false
+  | Leaf _ => true
+
+@[simp]
+def nonterminal {cfg : @CFG α ν} (tree : ParseTree cfg) (h : tree.isNode) : ν := match tree with
+  | ParseTree.Node n _ _ => n
+  | ParseTree.Leaf _ => by contradiction
+
+@[simp]
+def nonterminal? {cfg : @CFG α ν} : ParseTree cfg → Option ν
   | ParseTree.Node n _ _ => n
   | ParseTree.Leaf _ => none
+
+@[simp]
+def root {cfg : @CFG α ν} : ParseTree cfg → Symbol α ν
+  | ParseTree.Node n _ _ => nonterm n
+  | ParseTree.Leaf a => term a
 
 @[simp]
 def sizeOf_lt_of_child_forest {cfg : @CFG α ν} {child : ParseTree cfg} {forest : List (ParseTree cfg)} [SizeOf α] (h_mem : child ∈ forest)
@@ -223,14 +411,16 @@ def sizeOf_lt_of_child {cfg : @CFG α ν} {parent child : ParseTree cfg} [SizeOf
     | ParseTree.Leaf _ => by simp at h_mem
 
 
-def leaves {cfg : @CFG α ν} (tree : ParseTree cfg) : symbols α ν := match tree with
-  | ParseTree.Leaf a => [term a]
+def leaves {cfg : @CFG α ν} (tree : ParseTree cfg) : List α := match tree with
+  | ParseTree.Leaf a => [a]
   | ParseTree.Node _ _ children => children.attach.flatMap (fun ⟨node, _h_mem⟩ => leaves node)
 termination_by tree
 decreasing_by
   exact sizeOf_lt_of_child _h_mem
 
-#guard leaves my_tree == []
+#guard leaves my_tree₁ == []
+#guard leaves my_tree₂ == [a]
+#guard leaves my_tree₃ == [a, a]
 
 def Valid {cfg : @CFG α ν} (tree : ParseTree cfg) : Prop := match tree with
   | Leaf _ => True
@@ -261,7 +451,9 @@ decreasing_by
   rw [<- _h] at h_mem
   exact sizeOf_lt_of_child h_mem.right
 
-#guard my_tree.valid
+#guard my_tree₁.valid
+#guard my_tree₂.valid
+#guard my_tree₃.valid
 
 lemma lift_forall {α} {p q : α → Prop} (h : ∀ x, p x ↔ q x) : (∀ x, p x) ↔ (∀ x, q x) :=
     of_eq_true
@@ -298,7 +490,53 @@ decreasing_by
 instance decidable_of_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : Decidable tree.Valid :=
   decidable_of_iff (tree.valid = true) valid_eq_true_iff_valid
 
-example : Valid my_tree := by
-  native_decide
+example : my_tree₁.Valid := by native_decide
+example : my_tree₂.Valid := by native_decide
+example : my_tree₃.Valid := by native_decide
+
+theorem derives_of_Valid_tree {cfg : @CFG α ν} {tree : ParseTree cfg} (h : tree.Valid)
+    : cfg.derives [tree.root] (tree.leaves.map term) := match tree with
+  | Leaf a => by
+     simp [leaves]
+     exact Relation.ReflTransGen.refl
+  | Node n rule_and_mem children => by {
+    unfold Valid at h
+    simp at h
+    obtain ⟨h_len, h_recur⟩ := h
+    have ⟨rule, property⟩ := rule_and_mem
+    -- apply derives_of_derives_nth
+    refine @Relation.ReflTransGen.head (symbols α ν) cfg.yields ?_ rule ?_ ?_ ?_
+    · unfold yields
+      unfold yield
+      simp [List.getRest, property]
+    · simp only [symbols, leaves, List.flatMap_subtype, List.unattach_attach]
+      have derives_of_children (subtree : ParseTree cfg) (a : Symbol α ν) (h_mem : (a, subtree) ∈ (List.zip rule children))
+          : cfg.derives [subtree.root] (subtree.leaves.map term)
+        := by {
+          replace h_recur := h_recur a subtree h_mem
+          apply derives_of_Valid_tree
+          unfold Valid
+          cases h_subtree : subtree
+          · simp
+          · cases h_a : a with
+            | term =>
+              subst h_a h_subtree
+              simp at h_recur
+            | nonterm =>
+              subst h_a h_subtree
+              simp only at h_recur
+              unfold Valid at h_recur
+              simp [h_recur]
+      }
+
+      -- TODO(maemre): use `derives_of_append` to build the leaves from each symbol in the rhs of the rule
+      sorry
+
+
+  }
+termination_by tree
+decreasing_by
+  apply List.of_mem_zip at h_mem
+  exact sizeOf_lt_of_child h_mem.right
 
 end ParseTree
