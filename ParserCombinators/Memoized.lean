@@ -8,7 +8,8 @@ import Std.Data.HashMap.Lemmas
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Control.Fold
 
-variable { α : Type }  { μ : Type → Type }
+universe u v
+variable { α : Type u }  { μ : Type u → Type u }
 
 -- Tags for each parser, these don't carry type information.
 --
@@ -20,7 +21,7 @@ structure Tag where
   id : Int
   deriving DecidableEq, BEq, Hashable
 
-structure MemoData where
+structure MemoData : Type v where
   nextTag : Int -- need only the data inside
   table : Std.HashMap Tag (Std.HashMap Int Dynamic)
 
@@ -29,7 +30,9 @@ def startState : MemoData := {
   table := Std.HashMap.emptyWithCapacity
 }
 
-abbrev Memo (β : Type) := StateM MemoData β
+abbrev Memo (β : Type v) := StateM MemoData β
+
+abbrev UString := ULift String
 
 def fresh : Memo Tag := do
   let memo <- get
@@ -49,13 +52,13 @@ end Std.HashMap
 def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α → β → γ) (fa : F α) (fb : F β) : F γ :=
   f <$> fa <*> fb
 
-def joinUnderCache {γ} [Monad μ] [Alternative μ] (s1 s2 : StateT MemoData (ReaderM String) (Std.HashMap Int (μ γ))) : StateT MemoData (ReaderM String) (Std.HashMap Int (μ γ)) :=
+def joinUnderCache {γ} [Monad μ] [Alternative μ] (s1 s2 : StateT MemoData (ReaderM UString) (Std.HashMap Int (μ γ))) : StateT MemoData (ReaderM UString) (Std.HashMap Int (μ γ)) :=
   liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
 
 -- Some of the α's here should become existential/hidden
-structure Parser (μ : Type → Type) [Monad μ] (α : Type) where
-  -- getState : Int -> (StateT MemoData) (ReaderM String) (Std.HashMap Int (μ α))
-  getState : Int → StateT MemoData (ReaderM String) (Std.HashMap Int (μ α))
+structure Parser (μ : Type u → Type u) [Monad μ] (α : Type u) where
+  -- getState : Int -> (StateT MemoData) (ReaderM UString) (Std.HashMap Int (μ α))
+  getState : Int → StateT MemoData (ReaderM UString) (Std.HashMap Int (μ α))
 
 instance [Monad μ] : Functor (Parser μ) where
   map f x := ⟨ Functor.map (Std.HashMap.map (fun _ => Functor.map f)) ∘ x.getState ⟩
@@ -71,7 +74,7 @@ instance [Monad μ] [Alternative μ] [Traversable μ] : Bind (Parser μ) where
   bind {_ β} x f := {
     getState := fun pos => do
       let pivotToResult ← x.getState pos
-      let actions : List (μ (StateT MemoData (ReaderM String) (Std.HashMap Int (μ β)))) :=
+      let actions : List (μ (StateT MemoData (ReaderM UString) (Std.HashMap Int (μ β)))) :=
         pivotToResult.toList.map (fun (j, ma) => (fun a => (f a).getState j) <$> ma)
       actions.foldl
         (Traversable.foldl joinUnderCache)
@@ -94,16 +97,16 @@ instance [Monad μ] [Alternative μ] [Traversable μ] : Alternative (Parser μ) 
 instance [Monad μ] [Alternative μ] [Traversable μ] : Monad (Parser μ) where
 
 
-def epsilon [Monad μ] : Parser μ Unit := {
-  getState := fun pos => pure {(pos, pure ())}
+def epsilon [Monad μ] : Parser μ PUnit := {
+  getState := fun pos => pure {(pos, pure $ PUnit.unit)}
 }
 
-def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ Unit := {
+def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ PUnit := {
   getState := fun pos => do
     let input ← read
-    if pos >= 0 && s.isPrefixOf (input.drop pos.toNat) then
+    if pos >= 0 && s.isPrefixOf (input.down.drop pos.toNat) then
       let endPos := pos + s.length
-      pure {(endPos, pure ())}
+      pure {(endPos, pure PUnit.unit)}
     else
       pure Std.HashMap.emptyWithCapacity
 }
@@ -147,3 +150,44 @@ def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser 
       set { memo with table := newTable }
       pure results
 }
+
+-- Testing
+
+-- Will use `Option` as the concrete monad (some is success and none is failure)
+
+def runParser [Monad μ] (p : Parser μ α) (input : String) (pos : Int := 0) : (Std.HashMap Int (μ α)) × MemoData :=
+  let stateTResult := (p.getState pos).run startState
+  let readerResult := stateTResult.run $ ULift.up input
+  readerResult
+
+-- Checking to make sure that runParser has correct type
+#check runParser (μ := Option) epsilon "test"
+
+-- Testing running the parsers (had to extract just the hashmap
+-- because Lean couldn't extract a string from the full return type)
+#eval (runParser (μ := Option) (terminal "hello") "hello world").1
+
+
+#eval (runParser (μ := Option) (terminal "wo") "hello world" 6).1
+
+-- Failure
+#eval (runParser (μ := Option) (terminal "llo") "hello world" 5).1
+
+-- Edge case for empty string
+#eval (runParser (μ := Option) (terminal "") "hello world" 6).1
+
+
+-- Testing instances:
+
+-- Functor (`<$>`)
+def funcParser : Parser Option String := (fun _ => "matched!") <$> terminal "hello"
+
+-- TODO: (Madi) Just beef this up by testing edge cases
+#eval (runParser (μ := Option) funcParser "hello world").1
+
+
+-- Alternative (`<|>`)
+def altParser : Parser Option PUnit := (terminal "hello" : Parser Option PUnit) <|> (terminal "goodbye" : Parser Option PUnit)
+
+#guard (runParser.{0} (μ := Option) altParser "hello").1.toList == [(5, some PUnit.unit)]
+#guard (runParser.{0} (μ := Option) altParser "goodbye").1.toList == [(7, some PUnit.unit)]
