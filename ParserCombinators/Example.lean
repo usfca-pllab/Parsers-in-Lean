@@ -73,8 +73,8 @@ def parseB := parseChar' b
 
 abbrev ValidTreeS := { t : ValidTree // t.val.nonterminal? = some S }
 
-unsafe def parseS : Parser ValidTreeS :=
-  let parser1 : Parser ValidTreeS := by
+mutual
+unsafe def parser1 : Parser ValidTreeS := by
     refine map ?_ (concat parseA parseS)
     rintro ⟨⟨t, h⟩, ⟨treeS, hS⟩⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
@@ -104,7 +104,7 @@ unsafe def parseS : Parser ValidTreeS :=
 
     · contradiction
 
-
+unsafe def parseS : Parser ValidTreeS :=
   let parser2 : Parser ValidTreeS := by
     refine map ?_ parseA
     rintro ⟨t, h⟩
@@ -132,9 +132,11 @@ unsafe def parseS : Parser ValidTreeS :=
     subst left right
     simp_all only [↓Char.isValue]
 
+  -- TODO(maemre): try extracting the parser function for building it explicitly
   (or_parser parser1 (or_parser parser2 parser3))
+end
 
--- This crashes with a stack overflow
--- #eval ((parseS.run "b".data).map (fun (tree, rest) => tree.val.val)).getD (ParseTree.Leaf a)
+-- Replacing `#reduce` with `#eval` crashes with a stack overflow
+#reduce ((parseS.run "ab".data).map (fun (tree, _) => tree.val.val)).getD (ParseTree.Leaf a)
 
 end Example
