@@ -22,14 +22,15 @@ def parseA : Parser Char :=
 
 namespace ParserCombinators.Basic
 
-variable {a b : Type}
+universe u v
+variable {a : Type u} {b : Type v}
 
 abbrev Str := List Char
 /-
 Parser, returns an instance of the monadic ParseResult (either returns
 none or, in the success case, the parsed result and the rest of the unparsed input)
 -/
-structure Parser (a : Type) where
+structure Parser (a : Type u) where
   run : Str → Option (a × Str)
   decreases : ∀ s result, run s = some result → result.snd <:+ s
 
@@ -482,12 +483,12 @@ by
 
 
 -- Testing
-def parseChar (pred : Char -> Bool): Parser Char where
+def parseChar (pred : Char -> Bool): Parser { c : Char // pred c } where
   run := fun input =>
     match input with
       | []      => none
       | c :: cs =>
-        if pred c then some (c, cs)
+        if h : pred c then some (⟨c, h⟩, cs)
         else none
   decreases := by {
     intros input result h
@@ -495,11 +496,13 @@ def parseChar (pred : Char -> Bool): Parser Char where
     · simp [h_in] at h
     · rename_i c cs
       simp [h_in] at h
-      simp [<- h.right]
+      have ⟨_, h⟩ := h
+      simp [<- h]
   }
 
 theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
- : ((parseChar pred).run s = some (c, cs)) ↔ (s = c :: cs ∧ pred c) := by
+ {h : pred c }
+ : ((parseChar pred).run s = some (⟨c, h⟩, cs)) ↔ (s = c :: cs ∧ pred c) := by
   constructor
   · intro h
     unfold parseChar at h
@@ -507,9 +510,10 @@ theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
     match s with
     | [] => contradiction
     | c_inner :: cs_inner =>
-      simp only [ite_none_right_eq_some, some.injEq, Prod.mk.injEq] at h
+      simp only [dite_none_right_eq_some, some.injEq, Prod.mk.injEq, Subtype.mk.injEq,
+        exists_and_left, exists_prop] at h
       have ⟨h1, h2, h3⟩ := h
-      rw [h2] at h1
+      rw [h1] at h2
       simp [h1, h2, h3]
   · intro h
     unfold parseChar
@@ -522,7 +526,7 @@ theorem parseChar_is_correct (pred : Char -> Bool) (s : Str) (c : Char)
 def parseA := parseChar (fun c => c == 'a')
 def parseB := parseChar (fun c => c == 'b')
 
-#guard parseA.run "abc".data == some ('a', ['b', 'c'])
+#guard parseA.run "abc".data == some (⟨'a', by decide⟩, ['b', 'c'])
 
 -- def eps : Parser Unit := fun input => (() , input)
 

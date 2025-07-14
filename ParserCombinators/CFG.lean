@@ -39,7 +39,7 @@ namespace CFG
 open Symbol
 
 @[simp]
-def my_vars : Finset ℕ := {1,2,3}
+private def my_vars : Finset ℕ := {1,2,3}
 
 instance : OfNat my_vars 1 where
   ofNat := ⟨1, by decide⟩
@@ -51,7 +51,7 @@ instance : OfNat my_vars 3 where
   ofNat := ⟨3, by decide⟩
 
 @[simp]
-def my_alphabet : Finset Char := {'a', 'b', 'c'}
+private def my_alphabet : Finset Char := {'a', 'b', 'c'}
 
 @[simp]
 def of (c : Char ) ( h : c ∈ my_alphabet ) : my_alphabet := ⟨c, h⟩
@@ -306,13 +306,18 @@ theorem derives_of_append {cfg : @CFG α ν} {v₁ v₂ w₁ w₂ : symbols α �
     : cfg.derives (v₁ ++ v₂) (w₁ ++ w₂) := by
   exact Relation.ReflTransGen.trans (derives_of_append_left h₁) (derives_of_append_right h₂)
 
+end CFG
 
 -- A parse tree according to given grammar.  It stores which rule is used to build the current node.
 inductive ParseTree (cfg : @CFG α ν) : Type ((max u v) + 1) where
   | Leaf (t : α)
   | Node (n : ν) (rule : {rule // rule ∈ cfg.rules n}) (children : List (ParseTree cfg))
+  deriving Repr
 
 namespace ParseTree
+
+open CFG
+open Symbol
 
 def my_tree₁ : ParseTree my_cfg := Node 1 ⟨[], by decide⟩ []
 def my_tree₂ : ParseTree my_cfg := Leaf a
