@@ -273,7 +273,7 @@ private lemma derives_of_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : 
       unfold derives
       refine @Relation.ReflTransGen.head (symbols α ν) cfg.yields v u w ?_ ?_
       · exact h_yields
-      exact ih u h_recur
+      · exact ih u h_recur
 
 theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w ↔ ∃ n : ℕ, cfg.derives_nth n v w :=
   ⟨derives_nth_of_derives v w, derives_of_derives_nth v w⟩
@@ -309,7 +309,7 @@ theorem derives_of_append {cfg : @CFG α ν} {v₁ v₂ w₁ w₂ : symbols α �
 end CFG
 
 -- A parse tree according to given grammar.  It stores which rule is used to build the current node.
-inductive ParseTree (cfg : @CFG α ν) : Type ((max u v) + 1) where
+inductive ParseTree (cfg : @CFG α ν) : Type (max u v) where
   | Leaf (t : α)
   | Node (n : ν) (rule : {rule // rule ∈ cfg.rules n}) (children : List (ParseTree cfg))
   deriving Repr
@@ -422,7 +422,7 @@ lemma lift_forall {α} {p q : α → Prop} (h : ∀ x, p x ↔ q x) : (∀ x, p 
         (congrArg (fun x ↦ x ↔ ∀ (x : α), q x) (forall_congr fun x ↦ (fun x ↦ propext (h x)) x))
         (iff_self (∀ (x : α), q x)))
 
-lemma valid_eq_true_iff_valid {cfg : @CFG α ν} {tree : ParseTree cfg} : tree.valid = true ↔ tree.Valid := match h : tree with
+lemma valid_eq_true_iff_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : tree.valid = true ↔ tree.Valid := match h : tree with
   | ParseTree.Leaf _ => by unfold valid Valid ; decide
   | ParseTree.Node n rule children => by {
     unfold valid Valid
@@ -435,7 +435,7 @@ lemma valid_eq_true_iff_valid {cfg : @CFG α ν} {tree : ParseTree cfg} : tree.v
     rename_i subtree h_mem
     match a, h : subtree with
     | nonterm _, Node _ _ _ =>
-        have h' := @valid_eq_true_iff_valid cfg subtree
+        have h' := @valid_eq_true_iff_Valid cfg subtree
         rw [h] at h'
         simp [h']
     | nonterm _, Leaf _ => simp
@@ -449,7 +449,7 @@ decreasing_by
   exact sizeOf_lt_of_child h_mem.right
 
 instance decidable_of_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : Decidable tree.Valid :=
-  decidable_of_iff (tree.valid = true) valid_eq_true_iff_valid
+  decidable_of_iff (tree.valid = true) valid_eq_true_iff_Valid
 
 example : my_tree₁.Valid := by native_decide
 example : my_tree₂.Valid := by native_decide

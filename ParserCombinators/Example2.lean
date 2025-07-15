@@ -137,7 +137,7 @@ unsafe def parseS : Parser List ValidTreeS :=
 end
 
 #check runParser
-#check (runParser.{1} parseS "ab").1.values.flatten
+#check (runParser parseS "ab").1.values.flatten
 
 -- This breaks due to reaching maximum recursion depth
 -- #reduce (runParser.{1} parseS "ab").1.toList
