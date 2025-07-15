@@ -7,6 +7,7 @@ import Std.Data.HashMap.AdditionalOperations
 import Std.Data.HashMap.Lemmas
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Control.Fold
+import Aesop
 
 variable { α : Type }  { μ : Type → Type }
 
