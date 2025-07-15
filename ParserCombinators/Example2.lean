@@ -1,10 +1,9 @@
-import ParserCombinators.Basic
+import ParserCombinators.Memoized
 import ParserCombinators.CFG
 
-namespace Example
+namespace Example2
 
 open Symbol
-open ParserCombinators.Basic
 
 inductive MyVars where
   | S
@@ -51,12 +50,13 @@ abbrev ValidTree := { tree : ParseTree my_cfg // tree.Valid }
 
 -- A set of parsers
 
+#check Subtype
+
 @[simp]
-def parseChar' (expected : my_alphabet) : Parser {t : ValidTree // t.val = ParseTree.Leaf expected } := by
-  refine map ?_ $ parseChar (fun c => c == expected)
-  rintro ⟨c, h⟩
-  apply eq_of_beq at h
+def parseChar' (expected : my_alphabet) : Parser List {t : ValidTree // t.val = ParseTree.Leaf expected } := by
+  refine Functor.map ?_ $ terminal (String.mk [expected.val])
   let t : ParseTree my_cfg := ParseTree.Leaf expected
+  intro
   refine Subtype.mk ?_ ?_
   · use t
     unfold ParseTree.Valid
@@ -74,9 +74,9 @@ def parseB := parseChar' b
 abbrev ValidTreeS := { t : ValidTree // t.val.nonterminal? = some S }
 
 mutual
-unsafe def parser1 : Parser ValidTreeS := by
-    refine map ?_ (concat parseA parseS)
-    rintro ⟨⟨t, h⟩, ⟨treeS, hS⟩⟩
+unsafe def parser1 : Parser List ValidTreeS := by
+    refine (pure ?_) <*> parseA <*> parseS
+    rintro ⟨t, h⟩ ⟨treeS, hS⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
     refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
     unfold ParseTree.Valid
@@ -104,9 +104,9 @@ unsafe def parser1 : Parser ValidTreeS := by
 
     · contradiction
 
-unsafe def parseS : Parser ValidTreeS :=
-  let parser2 : Parser ValidTreeS := by
-    refine map ?_ parseA
+unsafe def parseS : Parser List ValidTreeS :=
+  let parser2 : Parser List ValidTreeS := by
+    refine ?_ <$> parseA
     rintro ⟨t, h⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a], by decide⟩ [t]
     refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
@@ -118,8 +118,8 @@ unsafe def parseS : Parser ValidTreeS :=
     obtain ⟨left, right⟩ := _h
     subst left right
     simp_all only [↓Char.isValue]
-  let parser3 : Parser ValidTreeS := by
-    refine map ?_ parseB
+  let parser3 : Parser List ValidTreeS := by
+    refine ?_ <$> parseB
     rintro ⟨t, h⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term b], by decide⟩ [t]
     refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
@@ -133,10 +133,13 @@ unsafe def parseS : Parser ValidTreeS :=
     simp_all only [↓Char.isValue]
 
   -- TODO(maemre): try extracting the parser function for building it explicitly
-  (or_parser parser1 (or_parser parser2 parser3))
+  (parser1 <|> (parser2 <|> parser3))
 end
 
--- Replacing `#reduce` with `#eval` crashes with a stack overflow
-#reduce ((parseS.run "ab".data).map (fun (tree, _) => tree.val.val)).getD (ParseTree.Leaf a)
+#check runParser
+#check (runParser.{1} parseS "ab").1.values.flatten
 
-end Example
+-- This breaks due to reaching maximum recursion depth
+-- #reduce (runParser.{1} parseS "ab").1.toList
+
+end Example2
