@@ -53,7 +53,8 @@ abbrev ValidTree := { tree : ParseTree my_cfg // tree.Valid }
 #check Subtype
 
 @[simp]
-def parseChar' (expected : my_alphabet) : Parser List {t : ValidTree // t.val = ParseTree.Leaf expected } := by
+def parseChar' {μ : Type → Type} [Monad μ] [Alternative μ] (expected : my_alphabet)
+    : Parser μ {t : ValidTree // t.val = ParseTree.Leaf expected } := by
   refine Functor.map ?_ $ terminal (String.mk [expected.val])
   let t : ParseTree my_cfg := ParseTree.Leaf expected
   intro
@@ -66,15 +67,15 @@ def parseChar' (expected : my_alphabet) : Parser List {t : ValidTree // t.val = 
     rfl
 
 @[simp]
-def parseA := parseChar' a
+def parseA {μ} [Monad μ] [Alternative μ] := parseChar' (μ := μ) a
 
 @[simp]
-def parseB := parseChar' b
+def parseB {μ} [Monad μ] [Alternative μ] := parseChar' (μ := μ) b
 
 abbrev ValidTreeS := { t : ValidTree // t.val.nonterminal? = some S }
 
 mutual
-unsafe def parser1 : Parser List ValidTreeS := by
+unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ ValidTreeS := by
     refine (pure ?_) <*> parseA <*> parseS
     rintro ⟨t, h⟩ ⟨treeS, hS⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
@@ -104,8 +105,8 @@ unsafe def parser1 : Parser List ValidTreeS := by
 
     · contradiction
 
-unsafe def parseS : Parser List ValidTreeS :=
-  let parser2 : Parser List ValidTreeS := by
+unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ ValidTreeS :=
+  let parser2 : Parser μ ValidTreeS := by
     refine ?_ <$> parseA
     rintro ⟨t, h⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a], by decide⟩ [t]
@@ -118,7 +119,7 @@ unsafe def parseS : Parser List ValidTreeS :=
     obtain ⟨left, right⟩ := _h
     subst left right
     simp_all only [↓Char.isValue]
-  let parser3 : Parser List ValidTreeS := by
+  let parser3 : Parser μ ValidTreeS := by
     refine ?_ <$> parseB
     rintro ⟨t, h⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term b], by decide⟩ [t]
@@ -138,8 +139,10 @@ end
 
 #check runParser
 #check (runParser parseS "ab").1.values.flatten
+#check (runParser (μ := Option) parseS "ab").1.values
 
 -- This breaks due to reaching maximum recursion depth
 -- #reduce (runParser.{1} parseS "ab").1.toList
+-- #reduce (runParser (μ := Option) parseS "ab").1.values
 
 end Example2
