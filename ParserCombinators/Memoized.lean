@@ -182,13 +182,46 @@ def runParser [Monad μ] (p : Parser μ α) (input : String) (pos : Int := 0) : 
 
 -- Functor (`<$>`)
 def funcParser : Parser Option String := (fun _ => "matched!") <$> terminal "hello"
+def funcParser2 : Parser Option Int := (fun x => x * 3) <$> terminal "hello" $> 2
 
 -- TODO: (Madi) Just beef this up by testing edge cases
-#eval (runParser (μ := Option) funcParser "hello world").1
-
+#guard (runParser (μ := Option) funcParser "hello world").1.toList == [(5, some "matched!")]
+#guard (runParser (μ := Option) funcParser "hell").1.toList == []
+#guard (runParser (μ := Option) funcParser2 "hello").1.toList == [(5, some 6)]
 
 -- Alternative (`<|>`)
-def altParser : Parser Option PUnit := (terminal "hello" : Parser Option PUnit) <|> (terminal "goodbye" : Parser Option PUnit)
+def altParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ PUnit :=
+  terminal "hello" <|> terminal "goodbye"
 
 #guard (runParser.{0} (μ := Option) altParser "hello").1.toList == [(5, some PUnit.unit)]
 #guard (runParser.{0} (μ := Option) altParser "goodbye").1.toList == [(7, some PUnit.unit)]
+#guard (runParser.{0} (μ := List) altParser "hello").1.toList == [(5, [PUnit.unit])]
+#guard (runParser.{0} (μ := List) altParser "goodbye").1.toList == [(7, [PUnit.unit])]
+
+-- Concatenation via bind (`>>=`)
+def concatParser {μ : Type → Type} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ (Int × Int) :=
+  (terminal "hello" $> 1) >>= (fun a => terminal "goodbye" $> (a, 2))
+
+-- NOTE(maemre): the commented-out tests crash
+#guard (runParser.{0} (μ := Option) concatParser "hello").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "goodbye").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "hellogoodbye").1.toList == [(12, some (1, 2))]
+-- #guard (runParser.{0} (μ := List) concatParser "hello").1.toList == []
+#guard (runParser.{0} (μ := List) concatParser "goodbye").1.toList == []
+-- #guard (runParser.{0} (μ := List) concatParser "hellogoodbye").1.toList == [(12, some (1, 2))]
+
+-- An ambiguous ε-free parser
+def concatParser2 [Monad μ] [Alternative μ] [Traversable μ] : Parser μ PUnit :=
+  let p1 := terminal "a" <|> terminal "aa"
+  p1 >>= fun _ => p1
+
+-- Ambiguity under Option vs. List
+#guard (runParser.{0} (μ := Option) concatParser2 "").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser2 "a").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser2 "aa").1.toList == [(2, some PUnit.unit)]
+#guard (runParser.{0} (μ := Option) concatParser2 "aaa").1.toList == [(2, some PUnit.unit), (3, some PUnit.unit)]
+
+#guard (runParser.{0} (μ := List) concatParser2 "").1.toList == []
+-- NOTE(maemre): The code below crashes for some reason
+-- #eval (runParser.{0} (μ := List) concatParser2 "a").1.toList == []
+-- #eval (runParser.{0} (μ := List) concatParser2 "aa").1.toList
