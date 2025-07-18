@@ -56,6 +56,9 @@ def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α �
 def joinUnderCache {γ} [Monad μ] [Alternative μ] (s1 s2 : StateT MemoData (ReaderM UString) (Std.HashMap Int (μ γ))) : StateT MemoData (ReaderM UString) (Std.HashMap Int (μ γ)) :=
   liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
 
+abbrev ParserState (μ : Type u → Type u) [Monad μ] (α : Type u) :=
+  StateT MemoData (ReaderM UString) (Std.HashMap Int (μ α))
+
 -- Some of the α's here should become existential/hidden
 structure Parser (μ : Type u → Type u) [Monad μ] (α : Type u) where
   -- getState : Int -> (StateT MemoData) (ReaderM UString) (Std.HashMap Int (μ α))
@@ -217,3 +220,21 @@ def concatParser2 [Monad μ] [Alternative μ] [Traversable μ] : Parser μ PUnit
 -- NOTE(maemre): The code below crashes for some reason
 -- #eval (runParser.{0} (μ := List) concatParser2 "a").1.toList == []
 -- #eval (runParser.{0} (μ := List) concatParser2 "aa").1.toList
+
+@[inline]
+def concat [Monad μ] [Alternative μ] [Traversable μ] [Append α] (p₁ p₂ : Parser μ α)
+    : Parser μ α := liftA2 Append.append p₁ p₂
+
+instance [Append α] : Append (ULift α) where
+  append a b := ULift.up $ a.down ++ b.down
+
+-- recursion via the inner parser function
+partial def recursiveParserF [Monad μ] [Alternative μ] [Traversable μ] (pos : Int) : ParserState μ UString :=
+  let p1 := terminal "a"
+  let p2 := terminal "b"
+  let p : Parser μ UString := (concat p1 ⟨recursiveParserF⟩) <|> p2
+  p.getState pos
+
+def recursiveParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ UString := Parser.mk recursiveParserF
+
+#guard (runParser.{0} (μ := Option) recursiveParser "ab").1.toList == [(2, some $ ULift.up "ab")]
