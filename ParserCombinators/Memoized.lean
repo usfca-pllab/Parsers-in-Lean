@@ -82,9 +82,7 @@ instance [Monad μ] [Alternative μ] [Traversable μ] : Bind (Parser μ) where
         (pure Std.HashMap.emptyWithCapacity)
   }
 
-instance [Monad μ] [Alternative μ]  [Traversable μ] : Applicative (Parser μ) where
-  -- derived from the Monad laws
-  seq f x := bind (x ()) (fun a => bind f (fun b => pure (b a)))
+instance [Monad μ] [Alternative μ] [Traversable μ] : Monad (Parser μ) where
 
 instance [Monad μ] [Alternative μ] [Traversable μ] : Alternative (Parser μ) where
   failure := { getState := fun _ => pure Std.HashMap.emptyWithCapacity }
@@ -94,9 +92,6 @@ instance [Monad μ] [Alternative μ] [Traversable μ] : Alternative (Parser μ) 
       let s2 := (r2 ()).getState pos
       joinUnderCache s1 s2
   }
-
-instance [Monad μ] [Alternative μ] [Traversable μ] : Monad (Parser μ) where
-
 
 def epsilon [Monad μ] : Parser μ PUnit := {
   getState := fun pos => pure {(pos, pure $ PUnit.unit)}
