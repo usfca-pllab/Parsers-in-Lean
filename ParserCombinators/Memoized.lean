@@ -97,12 +97,12 @@ def epsilon [Monad μ] : Parser μ PUnit := {
   getState := fun pos => pure {(pos, pure $ PUnit.unit)}
 }
 
-def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ PUnit := {
+def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ UString := {
   getState := fun pos => do
     let input ← read
     if pos >= 0 && s.isPrefixOf (input.down.drop pos.toNat) then
       let endPos := pos + s.length
-      pure {(endPos, pure PUnit.unit)}
+      pure {(endPos, pure $ ULift.up s)}
     else
       pure Std.HashMap.emptyWithCapacity
 }
@@ -157,20 +157,18 @@ def runParser [Monad μ] (p : Parser μ α) (input : String) (pos : Int := 0) : 
   readerResult
 
 -- Checking to make sure that runParser has correct type
-#check runParser (μ := Option) epsilon "test"
+#guard (runParser.{0} (μ := Option) epsilon "test").1.toList == [(0, some PUnit.unit)]
 
 -- Testing running the parsers (had to extract just the hashmap
 -- because Lean couldn't extract a string from the full return type)
-#eval (runParser (μ := Option) (terminal "hello") "hello world").1
-
-
-#eval (runParser (μ := Option) (terminal "wo") "hello world" 6).1
+#guard (runParser.{0} (μ := Option) (terminal "hello") "hello world").1.toList == [(5, some $ ULift.up "hello")]
+#guard (runParser.{0} (μ := Option) (terminal "wo") "hello world" 6).1.toList == [(8, some $ ULift.up "wo")]
 
 -- Failure
-#eval (runParser (μ := Option) (terminal "llo") "hello world" 5).1
+#guard (runParser.{0} (μ := Option) (terminal "llo") "hello world" 5).1.isEmpty
 
 -- Edge case for empty string
-#eval (runParser (μ := Option) (terminal "") "hello world" 6).1
+#guard (runParser.{0} (μ := Option) (terminal "") "hello world" 6).1.toList == [(6, some $ ULift.up "")]
 
 
 -- Testing instances:
@@ -185,30 +183,29 @@ def funcParser2 : Parser Option Int := (fun x => x * 3) <$> terminal "hello" $> 
 #guard (runParser (μ := Option) funcParser2 "hello").1.toList == [(5, some 6)]
 
 -- Alternative (`<|>`)
-def altParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ PUnit :=
+def altParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ UString :=
   terminal "hello" <|> terminal "goodbye"
 
-#guard (runParser.{0} (μ := Option) altParser "hello").1.toList == [(5, some PUnit.unit)]
-#guard (runParser.{0} (μ := Option) altParser "goodbye").1.toList == [(7, some PUnit.unit)]
-#guard (runParser.{0} (μ := List) altParser "hello").1.toList == [(5, [PUnit.unit])]
-#guard (runParser.{0} (μ := List) altParser "goodbye").1.toList == [(7, [PUnit.unit])]
+#guard (runParser.{0} (μ := Option) altParser "hello").1.toList == [(5, some $ ULift.up "hello")]
+#guard (runParser.{0} (μ := Option) altParser "goodbye").1.toList == [(7, some $ ULift.up "goodbye")]
+#guard (runParser.{0} (μ := List) altParser "hello").1.toList == [(5, [ULift.up "hello"])]
+#guard (runParser.{0} (μ := List) altParser "goodbye").1.toList == [(7, [ULift.up "goodbye"])]
 
 -- Concatenation via bind (`>>=`)
-def concatParser {μ : Type → Type} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ (Int × Int) :=
+def concatParser {μ : Type → Type} [Monad μ] [Alternative μ] [Traversable μ] (_: Unit) : Parser μ (Int × Int) :=
   (terminal "hello" $> 1) >>= (fun a => terminal "goodbye" $> (a, 2))
-
 -- NOTE(maemre): the commented-out tests crash
-#guard (runParser.{0} (μ := Option) concatParser "hello").1.toList == []
-#guard (runParser.{0} (μ := Option) concatParser "goodbye").1.toList == []
-#guard (runParser.{0} (μ := Option) concatParser "hellogoodbye").1.toList == [(12, some (1, 2))]
--- #guard (runParser.{0} (μ := List) concatParser "hello").1.toList == []
-#guard (runParser.{0} (μ := List) concatParser "goodbye").1.toList == []
--- #guard (runParser.{0} (μ := List) concatParser "hellogoodbye").1.toList == [(12, some (1, 2))]
+#guard (runParser.{0} (μ := Option) (concatParser ()) "hello").1.toList == []
+#guard (runParser.{0} (μ := Option) (concatParser ()) "goodbye").1.toList == []
+#guard (runParser.{0} (μ := Option) (concatParser ()) "hellogoodbye").1.toList == [(12, some (1, 2))]
+-- #guard (runParser.{0} (μ := List) (concatParser ()) "hello").1.toList == []
+#guard (runParser.{0} (μ := List) (concatParser ()) "goodbye").1.toList == []
+-- #guard (runParser.{0} (μ := List) (concatParser ()) "hellogoodbye").1.toList == [(12, some (1, 2))]
 
 -- An ambiguous ε-free parser
 def concatParser2 [Monad μ] [Alternative μ] [Traversable μ] : Parser μ PUnit :=
   let p1 := terminal "a" <|> terminal "aa"
-  p1 >>= fun _ => p1
+  p1 >>= fun _ => p1 $> PUnit.unit
 
 -- Ambiguity under Option vs. List
 #guard (runParser.{0} (μ := Option) concatParser2 "").1.toList == []
