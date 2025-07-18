@@ -195,14 +195,14 @@ def altParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ UString :
 #guard (runParser.{0} (μ := List) altParser "goodbye").1.toList == [(7, [ULift.up "goodbye"])]
 
 -- Concatenation via bind (`>>=`)
-def concatParser {μ : Type → Type} [Monad μ] [Alternative μ] [Traversable μ] (_: Unit) : Parser μ (Int × Int) :=
+def concatParser {μ : Type → Type} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ (Int × Int) :=
   (terminal "hello" $> 1) >>= (fun a => terminal "goodbye" $> (a, 2))
 -- NOTE(maemre): the commented-out tests crash
-#guard (runParser.{0} (μ := Option) (concatParser ()) "hello").1.toList == []
-#guard (runParser.{0} (μ := Option) (concatParser ()) "goodbye").1.toList == []
-#guard (runParser.{0} (μ := Option) (concatParser ()) "hellogoodbye").1.toList == [(12, some (1, 2))]
--- #guard (runParser.{0} (μ := List) (concatParser ()) "hello").1.toList == []
-#guard (runParser.{0} (μ := List) (concatParser ()) "goodbye").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "hello").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "goodbye").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "hellogoodbye").1.toList == [(12, some (1, 2))]
+-- #guard (runParser.{0} (μ := List) concatParser "hello").1.toList == []
+#guard (runParser.{0} (μ := List) concatParser "goodbye").1.toList == []
 -- #guard (runParser.{0} (μ := List) (concatParser ()) "hellogoodbye").1.toList == [(12, some (1, 2))]
 
 -- An ambiguous ε-free parser
