@@ -283,6 +283,6 @@ theorem memo_sound [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ �
     : (runParser (withFuel g n) s).1 ≼ (runParser (μ := μ) (memo g) s).1 := by
   sorry
 
-theorem memo_complete [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ α → Parser μ α) n s
-    : (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
+theorem memo_complete [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ α → Parser μ α) s
+    : ∃ n, (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
   sorry
