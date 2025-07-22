@@ -50,6 +50,7 @@ def unionWith {K V} [BEq K] [Hashable K] (m1 m2 : Std.HashMap K V) (f : V → V 
     | none => m.insert k v2) m1
 end Std.HashMap
 
+@[inline]
 def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α → β → γ) (fa : F α) (fb : F β) : F γ :=
   f <$> fa <*> fb
 
@@ -60,58 +61,49 @@ abbrev ParserState (μ : Type u → Type u) [Monad μ] (α : Type u) :=
   StateT MemoData (ReaderM UString) (Std.HashMap Int (μ α))
 
 -- Some of the α's here should become existential/hidden
-structure Parser (μ : Type u → Type u) [Monad μ] (α : Type u) where
-  -- getState : Int -> (StateT MemoData) (ReaderM UString) (Std.HashMap Int (μ α))
-  getState : Int → StateT MemoData (ReaderM UString) (Std.HashMap Int (μ α))
+abbrev Parser (μ : Type u → Type u) [Monad μ] (α : Type u) :=
+  Int → StateT MemoData (ReaderM UString) (Std.HashMap Int (μ α))
 
 instance [Monad μ] : Functor (Parser μ) where
-  map f x := ⟨ Functor.map (Std.HashMap.map (fun _ => Functor.map f)) ∘ x.getState ⟩
+  map f x := Functor.map (Std.HashMap.map (fun _ => Functor.map f)) ∘ x
 
 -- N.B. Have to define `pure` separately so that we can use it in `seq`
 -- Defines the ability to create the simplest parser possible
 instance [Monad μ] : Pure (Parser μ) where
-  pure a := ⟨fun pos => pure {(pos, pure a)}⟩
+  pure a := fun pos => pure {(pos, pure a)}
 
 -- might need other type class instances (e.g. to make fold work)
 -- also, you may need to define or find a fold operation for Std.HashMap
 instance [Monad μ] [Alternative μ] [Traversable μ] : Bind (Parser μ) where
-  bind {_ β} x f := {
-    getState := fun pos => do
-      let pivotToResult ← x.getState pos
+  bind {_ β} x f := fun pos => do
+      let pivotToResult ← x pos
       let actions : List (μ (StateT MemoData (ReaderM UString) (Std.HashMap Int (μ β)))) :=
-        pivotToResult.toList.map (fun (j, ma) => (fun a => (f a).getState j) <$> ma)
+        pivotToResult.toList.map (fun (j, ma) => (fun a => f a j) <$> ma)
       actions.foldl
         (Traversable.foldl joinUnderCache)
         (pure Std.HashMap.emptyWithCapacity)
-  }
 
 instance [Monad μ] [Alternative μ] [Traversable μ] : Monad (Parser μ) where
 
 instance [Monad μ] [Alternative μ] [Traversable μ] : Alternative (Parser μ) where
-  failure := { getState := fun _ => pure Std.HashMap.emptyWithCapacity }
-  orElse r1 r2 := {
-    getState := fun pos =>
-      let s1 := r1.getState pos
-      let s2 := (r2 ()).getState pos
-      joinUnderCache s1 s2
-  }
+  failure _pos := pure Std.HashMap.emptyWithCapacity
+  orElse r1 r2 pos :=
+    let s1 := r1 pos
+    let s2 := r2 () pos
+    joinUnderCache s1 s2
 
-def epsilon [Monad μ] : Parser μ PUnit := {
-  getState := fun pos => pure {(pos, pure $ PUnit.unit)}
-}
+def epsilon [Monad μ] : Parser μ PUnit := fun pos => pure {(pos, pure $ PUnit.unit)}
 
-def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ UString := {
-  getState := fun pos => do
-    let input ← read
-    if pos >= 0 && s.isPrefixOf (input.down.drop pos.toNat) then
-      let endPos := pos + s.length
-      pure {(endPos, pure $ ULift.up s)}
-    else
-      pure Std.HashMap.emptyWithCapacity
-}
+def terminal [Monad μ] [Alternative μ] (s : String) : Parser μ UString := fun pos => do
+  let input ← read
+  if pos >= 0 && s.isPrefixOf (input.down.drop pos.toNat) then
+    let endPos := pos + s.length
+    pure {(endPos, pure $ ULift.up s)}
+  else
+    pure Std.HashMap.emptyWithCapacity
 
-def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser μ α) : Parser μ α := {
-  getState := fun pos => do
+def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser μ α) : Parser μ α :=
+  fun pos => do
     let memo ← get
     -- Check if we have cached results for this tag and position
     match memo.table[tag]? with
@@ -123,7 +115,7 @@ def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser 
         | some cachedResult => pure {(pos, cachedResult)}
         | none =>
           -- Type mismatch in cache, recompute
-          let results ← p.getState pos
+          let results ← p pos
           -- Cache the new results
           let newPositionMap := results.fold (fun acc newPos result =>
             acc.insert newPos (Dynamic.mk result)) positionMap
@@ -132,7 +124,7 @@ def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser 
           pure results
       | none =>
         -- No cached result for this position, compute and cache
-        let results ← p.getState pos
+        let results ← p pos
         -- Cache the new results
         let newPositionMap := results.fold (fun acc newPos result =>
           acc.insert newPos (Dynamic.mk result)) positionMap
@@ -141,7 +133,7 @@ def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser 
         pure results
     | none =>
       -- No entry for this tag at all, so we compute it and cache it
-      let results ← p.getState pos
+      let results ← p pos
       -- Create new position map and cache the results
       let newPositionMap := results.fold (fun acc newPos result =>
         acc.insert newPos (Dynamic.mk result)) Std.HashMap.emptyWithCapacity
@@ -149,3 +141,150 @@ def memoize [TypeName α] [Monad μ] [TypeName (μ α)] (tag : Tag) (p : Parser 
       set { memo with table := newTable }
       pure results
 }
+=======
+
+-- Testing
+
+-- Will use `Option` as the concrete monad (some is success and none is failure)
+
+def runParser [Monad μ] (p : Parser μ α) (input : String) (pos : Int := 0) : (Std.HashMap Int (μ α)) × MemoData :=
+  let stateTResult := (p pos).run startState
+  let readerResult := stateTResult.run $ ULift.up input
+  readerResult
+
+-- Checking to make sure that runParser has correct type
+#guard (runParser.{0} (μ := Option) epsilon "test").1.toList == [(0, some PUnit.unit)]
+
+-- Testing running the parsers (had to extract just the hashmap
+-- because Lean couldn't extract a string from the full return type)
+#guard (runParser.{0} (μ := Option) (terminal "hello") "hello world").1.toList == [(5, some $ ULift.up "hello")]
+#guard (runParser.{0} (μ := Option) (terminal "wo") "hello world" 6).1.toList == [(8, some $ ULift.up "wo")]
+
+-- Failure
+#guard (runParser.{0} (μ := Option) (terminal "llo") "hello world" 5).1.isEmpty
+
+-- Edge case for empty string
+#guard (runParser.{0} (μ := Option) (terminal "") "hello world" 6).1.toList == [(6, some $ ULift.up "")]
+
+
+-- Testing instances:
+
+-- Functor (`<$>`)
+def funcParser : Parser Option String := (fun _ => "matched!") <$> terminal "hello"
+def funcParser2 : Parser Option Int := (fun x => x * 3) <$> terminal "hello" $> 2
+
+-- TODO: (Madi) Just beef this up by testing edge cases
+#guard (runParser (μ := Option) funcParser "hello world").1.toList == [(5, some "matched!")]
+#guard (runParser (μ := Option) funcParser "hell").1.toList == []
+#guard (runParser (μ := Option) funcParser2 "hello").1.toList == [(5, some 6)]
+
+-- Alternative (`<|>`)
+def altParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ UString :=
+  terminal "hello" <|> terminal "goodbye"
+
+#guard (runParser.{0} (μ := Option) altParser "hello").1.toList == [(5, some $ ULift.up "hello")]
+#guard (runParser.{0} (μ := Option) altParser "goodbye").1.toList == [(7, some $ ULift.up "goodbye")]
+#guard (runParser.{0} (μ := List) altParser "hello").1.toList == [(5, [ULift.up "hello"])]
+#guard (runParser.{0} (μ := List) altParser "goodbye").1.toList == [(7, [ULift.up "goodbye"])]
+
+-- Concatenation via bind (`>>=`)
+def concatParser {μ : Type → Type} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ (Int × Int) :=
+  (terminal "hello" $> 1) >>= (fun a => terminal "goodbye" $> (a, 2))
+-- NOTE(maemre): the commented-out tests crash
+#guard (runParser.{0} (μ := Option) concatParser "hello").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "goodbye").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser "hellogoodbye").1.toList == [(12, some (1, 2))]
+-- #guard (runParser.{0} (μ := List) concatParser "hello").1.toList == []
+#guard (runParser.{0} (μ := List) concatParser "goodbye").1.toList == []
+-- #guard (runParser.{0} (μ := List) (concatParser ()) "hellogoodbye").1.toList == [(12, some (1, 2))]
+
+-- An ambiguous ε-free parser
+def concatParser2 [Monad μ] [Alternative μ] [Traversable μ] : Parser μ PUnit :=
+  let p1 := terminal "a" <|> terminal "aa"
+  p1 >>= fun _ => p1 $> PUnit.unit
+
+-- Ambiguity under Option vs. List
+#guard (runParser.{0} (μ := Option) concatParser2 "").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser2 "a").1.toList == []
+#guard (runParser.{0} (μ := Option) concatParser2 "aa").1.toList == [(2, some PUnit.unit)]
+#guard (runParser.{0} (μ := Option) concatParser2 "aaa").1.toList == [(2, some PUnit.unit), (3, some PUnit.unit)]
+
+#guard (runParser.{0} (μ := List) concatParser2 "").1.toList == []
+-- NOTE(maemre): The code below crashes for some reason
+-- #eval (runParser.{0} (μ := List) concatParser2 "a").1.toList == []
+-- #eval (runParser.{0} (μ := List) concatParser2 "aa").1.toList
+
+@[inline]
+def concat [Monad μ] [Alternative μ] [Traversable μ] [Append α] (p₁ p₂ : Parser μ α)
+    : Parser μ α := liftA2 Append.append p₁ p₂
+
+instance [Append α] : Append (ULift α) where
+  append a b := ULift.up $ a.down ++ b.down
+
+-- recursion via the inner parser function
+partial def recursiveParser [Monad μ] [Alternative μ] [Traversable μ] : Parser μ UString :=
+  let p1 : Parser μ UString := terminal "a"
+  let p2 : Parser μ UString := terminal "b"
+  (concat p1 recursiveParser <|> p2)
+
+#guard (runParser.{0} (μ := Option) recursiveParser "ab").1.toList == [(2, some $ ULift.up "ab")]
+
+-- bounded recursion for a single parser
+def withFuel [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ α → Parser μ α) : ℕ → Parser μ α
+  | 0 => failure
+  | Nat.succ fuel => g (withFuel g fuel)
+
+def fueledParser [Monad μ] [Alternative μ] [Traversable μ] : ℕ → Parser μ UString := withFuel $ fun recur =>
+    let p1 : Parser μ UString := terminal "a"
+    let p2 : Parser μ UString := terminal "b"
+    (concat p1 recur <|> p2)
+
+#guard (runParser.{0} (μ := Option) (fueledParser 4) "aaab").1.toList = [(4, some { down := "aaab" })]
+#guard (runParser.{0} (μ := Option) (fueledParser 3) "aaab").1.toList = []
+
+-- bounded recursion for parser families
+def withFuel' {τ} [Monad μ] [Alternative μ] [Traversable μ] (g : (τ → Parser μ α) → τ → Parser μ α) : ℕ → (t : τ) → Parser μ α
+  | 0 => fun _ => failure
+  | Nat.succ fuel => g (withFuel' g fuel)
+
+/-
+A -> a B | c
+B -> b A
+
+A =>⋆ (ab⋆)c
+-/
+def mutualRec : ℕ → Parser Option UString := flip (withFuel' (τ := Fin 2) (fun recur t =>
+  match t with
+  | 0 =>
+    -- A
+    concat (terminal "a") (recur 1) <|> terminal "c"
+  | 1 =>
+    -- B
+    concat (terminal "b") (recur 0)
+)) (0 : Fin 2)
+
+#guard (runParser.{0} (mutualRec 5) "ababc").1.toList == [(5, some { down := "ababc" })]
+#guard (runParser.{0} (mutualRec 4) "ababc").1.toList == []
+
+-- want something this:
+def memo [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ α → Parser μ α) : Parser μ α :=
+  sorry
+
+def memo' {τ} [Monad μ] [Alternative μ] [Traversable μ] (g : (τ → Parser μ α) → τ → Parser μ α) : τ → Parser μ α :=
+  sorry
+
+-- this just defines a subset-like relation on the parse results, the details of implementation
+-- aren't that crucial
+def subsumed [Monad μ] [Alternative μ] [Traversable μ] (a b : Std.HashMap Int (μ α)) : Prop :=
+  ∀ k (h : k ∈ a), (a[k]'h <|> b[k]?.getD failure) = b[k]?.getD failure
+
+infix:50 " ≼ " => subsumed
+
+-- then, we want:
+theorem memo_sound [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ α → Parser μ α) n s
+    : (runParser (withFuel g n) s).1 ≼ (runParser (μ := μ) (memo g) s).1 := by
+  sorry
+
+theorem memo_complete [Monad μ] [Alternative μ] [Traversable μ] (g : Parser μ α → Parser μ α) s
+    : ∃ n, (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
+  sorry
