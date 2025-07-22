@@ -43,7 +43,7 @@ private def my_cfg : @CFG my_alphabet MyVars := {
     let a := of 'a' a_in
     fun x =>
     match x with
-      | S => [[term a, nonterm S], [term a], [term b]]
+      | S => [[Term a, Nonterm S], [Term a], [Term b]]
 }
 
 abbrev ValidTree := { tree : ParseTree my_cfg // tree.Valid }
@@ -78,7 +78,7 @@ mutual
 unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ ValidTreeS := by
     refine (pure ?_) <*> parseA <*> parseS
     rintro ⟨t, h⟩ ⟨treeS, hS⟩
-    let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
+    let root : ParseTree my_cfg := ParseTree.Node S ⟨[Term a, Nonterm S], by decide⟩ [t, treeS]
     refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
     unfold ParseTree.Valid
     simp at hS
@@ -109,7 +109,7 @@ unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ 
   let parser2 : Parser μ ValidTreeS := by
     refine ?_ <$> parseA
     rintro ⟨t, h⟩
-    let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a], by decide⟩ [t]
+    let root : ParseTree my_cfg := ParseTree.Node S ⟨[Term a], by decide⟩ [t]
     refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
     unfold ParseTree.Valid
     simp_all [↓Char.isValue]
@@ -122,7 +122,7 @@ unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser μ 
   let parser3 : Parser μ ValidTreeS := by
     refine ?_ <$> parseB
     rintro ⟨t, h⟩
-    let root : ParseTree my_cfg := ParseTree.Node S ⟨[term b], by decide⟩ [t]
+    let root : ParseTree my_cfg := ParseTree.Node S ⟨[Term b], by decide⟩ [t]
     refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
     unfold ParseTree.Valid
     simp_all [↓Char.isValue]
