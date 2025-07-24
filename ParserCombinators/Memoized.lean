@@ -89,46 +89,34 @@ def terminal' [CollectionLike μ] (t: β) : Parser (tag := tag) β μ β := fun 
   else
     pure Std.HashMap.emptyWithCapacity
 
-/-
-def memoize [TypeName α] [CollectionLike μ] [TypeName (μ α)] (tag : Tag) (p : Parser (tag := tag) β μ α) : Parser (tag := tag) β μ α :=
+-- TODO(maemre): this is increasing the memoization table, which is a Noetherian lattice.
+-- We need to make a termination argument using that.
+partial def memoize [CollectionLike μ] [Traversable μ] (g : ((t : τ) → Parser (tag := tag) β μ (tag t)) → (t : τ) → Parser (tag := tag) β μ (tag t)) (t : τ) : Parser (tag := tag) β μ (tag t) :=
   fun pos => do
     let memo ← get
     -- Check if we have cached results for this tag and position
-    match memo.table[tag]? with
+    match memo.table.get? t with
     | some positionMap =>
       match positionMap[pos]? with
-      | some dynamicResult =>
-        -- We have a cached result, try to unbox it
-        match dynamicResult.get? (μ α) with
-        | some cachedResult => pure {(pos, cachedResult)}
-        | none =>
-          -- Type mismatch in cache, recompute
-          let results ← p pos
-          -- Cache the new results
-          let newPositionMap := results.fold (fun acc newPos result =>
-            acc.insert newPos (Dynamic.mk result)) positionMap
-          let newTable := memo.table.insert tag newPositionMap
-          set { memo with table := newTable }
-          pure results
+      | some cachedResult => pure {(pos, cachedResult)}
       | none =>
         -- No cached result for this position, compute and cache
-        let results ← p pos
+        let results ← g (memoize g) t pos
         -- Cache the new results
         let newPositionMap := results.fold (fun acc newPos result =>
-          acc.insert newPos (Dynamic.mk result)) positionMap
-        let newTable := memo.table.insert tag newPositionMap
+          acc.insert newPos result) positionMap
+        let newTable := memo.table.insert t newPositionMap
         set { memo with table := newTable }
         pure results
     | none =>
       -- No entry for this tag at all, so we compute it and cache it
-      let results ← p pos
+      let results ← g (memoize g) t pos
       -- Create new position map and cache the results
       let newPositionMap := results.fold (fun acc newPos result =>
-        acc.insert newPos (Dynamic.mk result)) Std.HashMap.emptyWithCapacity
-      let newTable := memo.table.insert tag newPositionMap
+        acc.insert newPos result) Std.HashMap.emptyWithCapacity
+      let newTable := memo.table.insert t newPositionMap
       set { memo with table := newTable }
       pure results
--/
 
 -- Testing
 
@@ -299,3 +287,24 @@ theorem memo_sound [CollectionLike μ] [Traversable μ] (g : Parser (tag := tag)
 theorem memo_complete [CollectionLike μ] [Traversable μ] (g : Parser (tag := tag) β μ α → Parser (tag := tag) β μ α) s
     : ∃ n, (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
   sorry
+
+def mutualRecMemo : Parser (τ := Fin 2) (tag := fun _ => UString) UChar Option UString := (memoize $ fun recur t =>
+  match t with
+    | 0 =>
+      -- A
+      concat (terminal "a") (recur 1) <|> terminal "c"
+    | 1 =>
+      -- B
+      concat (terminal "b") (recur 0)
+  ) (0 : Fin 2)
+
+#guard (runParser' mutualRecMemo "ababc").1.toList == [(5, some { down := "ababc" })]
+
+
+-- S -> S a | a
+def leftRecMemo : Parser (τ := Unit) (tag := fun _ => UString) UChar Option UString := (memoize $ fun recur (_: Unit) =>
+  concat (recur ()) (terminal "a") <|> terminal "a"
+  ) ()
+
+-- this still causes stack overflow because we don't have left recursion detection
+-- #guard (runParser' leftRecMemo "aaa").1.toList == [(5, some { down := "aaa" })]
