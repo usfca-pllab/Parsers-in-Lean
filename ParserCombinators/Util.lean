@@ -63,3 +63,23 @@ lemma zip_eq_nil_of_eq_length {α β} {xs : List α} {ys : List β} (h_len : xs.
   constructor
   · assumption
   · exact List.eq_nil_iff_length_eq_zero.mpr (id (Eq.symm h_len))
+
+namespace Std.HashMap
+def unionWith {K V} [BEq K] [Hashable K] (m1 m2 : Std.HashMap K V) (f : V → V → V) : Std.HashMap K V :=
+  m2.fold (fun m k v2 =>
+    match m[k]? with
+    -- Collision case, meshes the two values found into one new value (based on the given function `f`)
+    | some v1 => m.insert k (f v1 v2)
+    -- New key case, juar adds the value we found
+    | none => m.insert k v2) m1
+end Std.HashMap
+
+namespace Std.DHashMap
+def unionWith {K v} [BEq K] [LawfulBEq K] [Hashable K] (m1 m2 : Std.DHashMap K v) (f : (α : K) → v α → v α → v α) : Std.DHashMap K v :=
+  m2.fold (fun m k v2 =>
+    match m.get? k with
+    -- Collision case, meshes the two values found into one new value (based on the given function `f`)
+    | some v1 => m.insert k (f k v1 v2)
+    -- New key case, juar adds the value we found
+    | none => m.insert k v2) m1
+end Std.DHashMap
