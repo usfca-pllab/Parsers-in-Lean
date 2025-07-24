@@ -7,6 +7,7 @@ import Std.Data.HashMap.AdditionalOperations
 import Std.Data.HashMap.Lemmas
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Control.Fold
+import ParserCombinators.MState
 import Aesop
 
 -- β is the alphabet: parsers work over Array β
@@ -27,20 +28,15 @@ structure MemoData : Type v where
   nextTag : Int -- need only the data inside
   table : Std.HashMap Tag (Std.HashMap Int Dynamic)
 
+instance : SemilatticeSup MemoData := sorry
+
 def startState : MemoData := {
   nextTag := 0
   table := Std.HashMap.emptyWithCapacity
 }
 
-abbrev Memo (β : Type v) := StateM MemoData β
-
 abbrev UChar := ULift Char
 abbrev UString := ULift String
-
-def fresh : Memo Tag := do
-  let memo <- get
-  set { memo with nextTag := memo.nextTag + 1 }
-  pure ⟨ memo.nextTag ⟩
 
 namespace Std.HashMap
 def unionWith {K V} [BEq K] [Hashable K] (m1 m2 : Std.HashMap K V) (f : V → V → V) : Std.HashMap K V :=
@@ -56,15 +52,15 @@ end Std.HashMap
 def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α → β → γ) (fa : F α) (fb : F β) : F γ :=
   f <$> fa <*> fb
 
-def joinUnderCache {β γ} [Monad μ] [Alternative μ] (s1 s2 : StateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ γ))) : StateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ γ)) :=
+def joinUnderCache {β γ} [Monad μ] [Alternative μ] (s1 s2 : MStateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ γ))) : MStateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ γ)) :=
   liftA2 (fun m1 m2 => Std.HashMap.unionWith m1 m2 (fun v1 v2 => v1 <|> v2)) s1 s2
 
 abbrev ParserState (μ : Type u → Type u) [Monad μ] (α : Type u) :=
-  StateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ α))
+  MStateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ α))
 
 -- Some of the α's here should become existential/hidden
 abbrev Parser (β : Type u) (μ : Type u → Type u) [Monad μ] (α : Type u) :=
-  Int → StateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ α))
+  Int → MStateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ α))
 
 instance [Monad μ] : Functor (Parser β μ) where
   map f x := Functor.map (Std.HashMap.map (fun _ => Functor.map f)) ∘ x
@@ -79,7 +75,7 @@ instance [Monad μ] : Pure (Parser β μ) where
 instance [Monad μ] [Alternative μ] [Traversable μ] : Bind (Parser β μ) where
   bind {_ β'} x f := fun pos => do
       let pivotToResult ← x pos
-      let actions : List (μ (StateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ β')))) :=
+      let actions : List (μ (MStateT MemoData (ReaderM (Array β)) (Std.HashMap Int (μ β')))) :=
         pivotToResult.toList.map (fun (j, ma) => (fun a => f a j) <$> ma)
       actions.foldl
         (Traversable.foldl joinUnderCache)
