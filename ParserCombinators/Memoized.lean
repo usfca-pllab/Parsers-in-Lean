@@ -7,6 +7,7 @@ import Std.Data.HashMap.AdditionalOperations
 import Std.Data.HashMap.Lemmas
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Control.Fold
+import Batteries.Control.AlternativeMonad
 import Aesop
 
 -- β is the alphabet: parsers work over Array β
@@ -93,6 +94,26 @@ instance [Monad μ] [Alternative μ] [Traversable μ] : Alternative (Parser β �
     let s1 := r1 pos
     let s2 := r2 () pos
     joinUnderCache s1 s2
+
+instance [Monad μ] [Alternative μ] [Traversable μ] : LawfulMonad (Parser β μ) := by {
+  refine LawfulMonad.mk' (Parser β μ) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+  · sorry
+  · sorry
+  · sorry
+  · sorry  -- use the proofs for the default impl
+  · sorry  -- use the proofs for the default impl
+  · sorry  -- use the proofs for the default impl
+  · sorry  -- use the proofs for the default impl
+  · sorry  -- use the proofs for the default impl
+}
+
+instance [Monad μ] [Alternative μ] [Traversable μ] : LawfulAlternative (Parser β μ) where
+  map_failure := sorry
+  failure_seq := sorry
+  orElse_failure := sorry
+  failure_orElse := sorry
+  orElse_assoc := sorry
+  map_orElse := sorry
 
 def epsilon [Monad μ] : Parser β μ PUnit := fun pos => pure {(pos, pure $ PUnit.unit)}
 
