@@ -54,7 +54,7 @@ abbrev ValidTree := { tree : ParseTree my_cfg // tree.Valid }
 
 @[simp]
 def parseChar' {μ : Type → Type} [Monad μ] [Alternative μ] (expected : my_alphabet)
-    : Parser UChar μ {t : ValidTree // t.val = ParseTree.Leaf expected } := by
+    : Parser (tag := emptyTag) UChar μ {t : ValidTree // t.val = ParseTree.Leaf expected } := by
   refine Functor.map ?_ $ terminal (String.mk [expected.val])
   let t : ParseTree my_cfg := ParseTree.Leaf expected
   intro
@@ -75,7 +75,7 @@ def parseB {μ} [Monad μ] [Alternative μ] := parseChar' (μ := μ) b
 abbrev ValidTreeS := { t : ValidTree // t.val.nonterminal? = some S }
 
 mutual
-unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser UChar μ ValidTreeS := by
+unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser (tag := emptyTag) UChar μ ValidTreeS := by
     refine (pure ?_) <*> parseA <*> parseS
     rintro ⟨t, h⟩ ⟨treeS, hS⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
@@ -105,7 +105,7 @@ unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser UC
 
     · contradiction
 
-unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser UChar μ ValidTreeS :=
+unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] : Parser (tag := emptyTag) UChar μ ValidTreeS :=
   let parser2 : Parser UChar μ ValidTreeS := by
     refine ?_ <$> parseA
     rintro ⟨t, h⟩

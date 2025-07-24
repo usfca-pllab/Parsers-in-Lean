@@ -3,6 +3,7 @@
 import Mathlib.Order.Lattice
 import Aesop
 import Mathlib.Control.Bifunctor
+import ParserCombinators.Util
 
 universe u
 
@@ -45,3 +46,28 @@ instance [Monad μ] [SemilatticeSup σ] : MonadStateOf σ (MStateT σ μ) where
   modifyGet f s :=
     let (a, s') := f s
     MStateT.merge a s' s
+
+class abbrev CollectionLike (μ : Type u → Type u) := Monad μ, Alternative μ
+
+instance [Monad μ] [Alternative μ] : CollectionLike μ where
+  failure := Alternative.failure
+  orElse := Alternative.orElse
+
+-- A semilattice for MemoData
+--
+-- this fixes the tag type
+structure MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] where
+  table : Std.DHashMap τ (fun t => Std.HashMap Int (μ (typ t)))
+
+instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] (typ : τ → Type u) : Max (MemoData typ μ) where
+  max a b := ⟨by
+    refine a.table.unionWith b.table ?_
+    intro t inner₁ inner₂
+    refine inner₁.unionWith inner₂ (fun x y => x <|> y)
+  ⟩
+
+instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] (typ : τ → Type u) : SemilatticeSup (MemoData typ μ) := by
+  refine SemilatticeSup.mk' (α := MemoData typ μ) ?_ ?_ ?_
+  · sorry -- sup_comm
+  · sorry -- sup_assoc
+  · sorry -- sup_refl
