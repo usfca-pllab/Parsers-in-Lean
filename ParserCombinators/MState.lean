@@ -53,21 +53,33 @@ instance [Monad μ] [Alternative μ] : CollectionLike μ where
   failure := Alternative.failure
   orElse := Alternative.orElse
 
+example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] :=
+  Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap Int (μ (typ t))))
+
+abbrev setoid {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] := Std.DHashMap.isSetoid τ (fun t => Std.HashMap Int (μ (typ t)))
+
 -- A semilattice for MemoData
 --
 -- this fixes the tag type
 structure MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] where
-  table : Std.DHashMap τ (fun t => Std.HashMap Int (μ (typ t)))
+  table : Quotient (setoid typ μ)
 
 instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] (typ : τ → Type u) : Max (MemoData typ μ) where
   max a b := ⟨by
-    refine a.table.unionWith b.table ?_
-    intro t inner₁ inner₂
-    refine inner₁.unionWith inner₂ (fun x y => x <|> y)
+    refine Quotient.liftOn₂ a.table b.table ?_ ?_
+    · intro a b
+      exact Quotient.mk (setoid typ μ) $ a.unionWith b $ fun t inner₁ inner₂ => inner₁.unionWith inner₂ (fun x y => x <|> y)
+    · intro a₁ b₁ a₂ b₂ h_a h_b
+      unfold setoid Std.DHashMap.isSetoid
+      simp_all only [Quotient.eq]
+      apply Std.DHashMap.Equiv.of_forall_get?_eq
+      intro k
+
   ⟩
 
 instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] (typ : τ → Type u) : SemilatticeSup (MemoData typ μ) := by
   refine SemilatticeSup.mk' (α := MemoData typ μ) ?_ ?_ ?_
   · sorry -- sup_comm
   · sorry -- sup_assoc
-  · sorry -- sup_refl
+  · rintro ⟨tbl⟩
+    simp [max, Std.DHashMap.unionWith]

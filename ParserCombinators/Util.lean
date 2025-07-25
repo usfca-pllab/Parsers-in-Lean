@@ -1,6 +1,7 @@
 -- Some helper lemmas not proven in the Stdlib
 
 import Mathlib.Data.List.Basic
+import Mathlib.Algebra.Group.Defs
 
 universe u
 variable {α : Type u} [DecidableEq α]
@@ -65,13 +66,19 @@ lemma zip_eq_nil_of_eq_length {α β} {xs : List α} {ys : List β} (h_len : xs.
   · exact List.eq_nil_iff_length_eq_zero.mpr (id (Eq.symm h_len))
 
 namespace Std.HashMap
-def unionWith {K V} [BEq K] [Hashable K] (m1 m2 : Std.HashMap K V) (f : V → V → V) : Std.HashMap K V :=
-  m2.fold (fun m k v2 =>
-    match m[k]? with
-    -- Collision case, meshes the two values found into one new value (based on the given function `f`)
-    | some v1 => m.insert k (f v1 v2)
-    -- New key case, juar adds the value we found
-    | none => m.insert k v2) m1
+def unionWith [BEq α] [LawfulBEq α] [Hashable α] [AddCommMonoid β] (m1 m2 : Std.HashMap α β) : Std.HashMap α β :=
+    Std.HashMap.ofList $ (fun k => (k, m1.getD k 0 + m2.getD k 0)) <$> (m1.keys ++ m2.keys)
+
+
+lemma unionWith_equiv [BEq α] [LawfulBEq α] [Hashable α] [AddCommMonoid β] (m1 m2 : Std.HashMap α β) : m1.unionWith m1 ~m m1 := by {
+  unfold unionWith
+  refine Std.HashMap.Equiv.of_forall_getElem?_eq ?_
+  intro k
+  simp [Std.HashMap.ofList_eq_insertMany_empty]
+  simp [Std.HashMap.getElem?_insertMany_list]
+  -- show that all elements have the same value
+  sorry
+}
 end Std.HashMap
 
 namespace Std.DHashMap
