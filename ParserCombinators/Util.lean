@@ -96,10 +96,10 @@ private lemma h_findSome?_eq_some {l} (h: k ∈ l) {f : α → β}
 
 
 namespace Std.HashMap
-variable {β} [BEq α] [LawfulBEq α] [Hashable α] [SemilatticeSup β] [OrderBot β]
+variable {β : Type v} [BEq α] [LawfulBEq α] [Hashable α] [SemilatticeSup β] [OrderBot β]
 
 def unionWith (m₁ m₂ : Std.HashMap α β) : Std.HashMap α β :=
-    Std.HashMap.ofList $ (fun k => (k, m₁.getD k ⊥ ⊔ m₂.getD k ⊥)) <$> (m₁.keys ++ m₂.keys)
+    Std.HashMap.ofList $ List.map (fun k => (k, m₁.getD k ⊥ ⊔ m₂.getD k ⊥)) (m₁.keys ++ m₂.keys)
 
 lemma unionWith_equiv_idem (m : Std.HashMap α β) : m.unionWith m ~m m := by {
   unfold unionWith
