@@ -4,6 +4,7 @@ import Mathlib.Order.Lattice
 import Aesop
 import Mathlib.Control.Bifunctor
 import ParserCombinators.Util
+import Batteries.Control.AlternativeMonad
 
 universe u
 
@@ -53,10 +54,31 @@ instance [Monad μ] [Alternative μ] : CollectionLike μ where
   failure := Alternative.failure
   orElse := Alternative.orElse
 
+-- Alternatives that yield a semilattice structure
+class SemilatticeAlt (μ : Type u → Type u) extends Alternative μ, LawfulAlternative μ where
+  alt_idem (m : μ α) : (m <|> m) = m
+  alt_comm (m₁ m₂ : μ α) : (m₁ <|> m₂) = (m₂ <|> m₁)
+  alt_assoc (m₁ m₂ m₃ : μ α) : ((m₁ <|> m₂) <|> m₃) = (m₁ <|> m₂ <|> m₃)
+    := symm $ LawfulAlternative.orElse_assoc m₁ m₂ m₃
+
 example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] :=
   Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap Int (μ (typ t))))
 
 abbrev setoid {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] := Std.DHashMap.isSetoid τ (fun t => Std.HashMap Int (μ (typ t)))
+
+-- A semilattice for the memoized types
+instance [Alternative μ] : Max (μ α) where
+  max m₁ m₂ := m₁ <|> m₂
+
+instance [SemilatticeAlt μ] : SemilatticeSup (μ α) :=
+  SemilatticeSup.mk' SemilatticeAlt.alt_comm SemilatticeAlt.alt_assoc SemilatticeAlt.alt_idem
+
+instance [SemilatticeAlt μ] : OrderBot (μ α) where
+  bot := failure
+  bot_le a := by
+    have h : a = failure ⊔ a := symm $ LawfulAlternative.failure_orElse a
+    rw [h]
+    exact SemilatticeSup.le_sup_left failure a
 
 -- A semilattice for MemoData
 --
@@ -64,17 +86,20 @@ abbrev setoid {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLi
 structure MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] where
   table : Quotient (setoid typ μ)
 
-instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] (typ : τ → Type u) : Max (MemoData typ μ) where
+set_option diagnostics true
+instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] [SemilatticeAlt μ]
+  (typ : τ → Type u)
+    : Max (MemoData typ μ) where
   max a b := ⟨by
     refine Quotient.liftOn₂ a.table b.table ?_ ?_
     · intro a b
-      exact Quotient.mk (setoid typ μ) $ a.unionWith b $ fun t inner₁ inner₂ => inner₁.unionWith inner₂ (fun x y => x <|> y)
+      exact Quotient.mk (setoid typ μ) $ a.unionWith b $ fun t inner₁ inner₂ => inner₁.unionWith inner₂
     · intro a₁ b₁ a₂ b₂ h_a h_b
       unfold setoid Std.DHashMap.isSetoid
-      simp_all only [Quotient.eq]
+      -- simp_all only [Quotient.eq]
       apply Std.DHashMap.Equiv.of_forall_get?_eq
       intro k
-
+      sorry
   ⟩
 
 instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] (typ : τ → Type u) : SemilatticeSup (MemoData typ μ) := by
