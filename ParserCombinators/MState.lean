@@ -145,7 +145,20 @@ private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [La
     -- rw [Std.DHashMap.get?_eq_some_get]
     · simp_all [hm_quot_mk]
       by_cases h₂ : k ∈ a₂
-      · sorry
+      · unfold Std.DHashMap.unionSup  Std.DHashMap.unionWith
+        simp [Std.DHashMap.ofList_eq_insertMany_empty]
+        simp [Std.DHashMap.get?_insertMany_list]
+        simp [<- List.map_reverse, List.findSome?_map]
+        unfold Function.comp
+        simp only []
+        rw [h_findSome?_eq_some']
+        · simp only [Option.some_or, Option.map_some]
+          rw [h_findSome?_eq_some']
+          · simp [hm_quot_mk, Std.DHashMap.getD_map]
+            simp [<- Std.DHashMap.get_eq_getD, Std.DHashMap.get?_eq_some_get, h, h₂]
+            rfl
+          · simp_all
+        · simp_all
       · have h_comm := Std.DHashMap.unionSup_equiv_comm (Std.DHashMap.map hm_quot_mk a₁) (Std.DHashMap.map hm_quot_mk a₂)
         rw [Std.DHashMap.Equiv.get?_eq h_comm]
         rw [Std.DHashMap.unionSup_getElem_of_not_contains]
