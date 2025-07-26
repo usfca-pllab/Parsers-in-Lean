@@ -124,11 +124,19 @@ lemma h_findSome?_eq_some' {β : α → Type v} {l} (h: k ∈ l) {f : (a : α) �
         | inr h_2 => simp_all only [forall_const]
 
 namespace Std.HashMap
-variable {β : Type v} [BEq α] [LawfulBEq α] [Hashable α] [SemilatticeSup β] [OrderBot β]
+variable {β : Type v} [BEq α] [LawfulBEq α] [Hashable α]
+
+section unionSup
+variable [Max β] [Bot β]
 
 -- Take the union of `m₁` and `m₂`, merge conflicting values with `⊔`.
+-- The definition doesn't assume a semilattice structure, but the theorems do.
 def unionSup (m₁ m₂ : Std.HashMap α β) : Std.HashMap α β :=
     Std.HashMap.ofList $ List.map (fun k => (k, m₁.getD k ⊥ ⊔ m₂.getD k ⊥)) (m₁.keys ++ m₂.keys)
+
+end unionSup
+
+variable [SemilatticeSup β] [OrderBot β]
 
 lemma unionSup_equiv_idem (m : Std.HashMap α β) : m.unionSup m ~m m := by {
   unfold unionSup
@@ -407,48 +415,6 @@ instance : OrderBot (QEquiv α β) where
 
 end Semilattice
 end Std.HashMap
-
--- A `Semilatticeoid` is a type that can be quotiened into a semilattice structure
---
--- We also require a `Max` implementation that abides by the quotient structure
-class Semilatticeoid α (s : Setoid α) extends SemilatticeSup (Quotient s), Max α where
-  quot_max_eq_max_quot (a b : α) : SemilatticeSup.sup (α := Quotient s) ⟦a⟧ ⟦b⟧ = ⟦a ⊔ b⟧
-
-instance [s : Setoid α] [l : Semilatticeoid α s] : Preorder α where
-  le a b := ⟦a⟧ ≤ ⟦b⟧
-  le_refl a := Preorder.le_refl ⟦a⟧
-  le_trans a b c := Preorder.le_trans (α := Quotient s) ⟦a⟧ ⟦b⟧ ⟦c⟧
-
--- the semilattice axioms that can be lifted to `Semilatticeoid` structure
-namespace Semilatticeoid
-omit [DecidableEq α]
-
-theorem lift_le_sup_left {s : Setoid α} [Semilatticeoid α s] {a b : α} : a ≤ a ⊔ b := by {
-  dsimp [LE.le]
-  rw [<- quot_max_eq_max_quot]
-  exact le_sup_left
-}
-
-theorem lift_le_sup_right {s : Setoid α} [Semilatticeoid α s] {a b : α} : b ≤ a ⊔ b := by {
-  dsimp [LE.le]
-  rw [<- quot_max_eq_max_quot]
-  exact le_sup_right
-}
-
-theorem lift_sup_le {s : Setoid α} [Semilatticeoid α s] {a b c : α} : a ≤ c → b ≤ c → a ⊔ b ≤ c := by {
-  dsimp [LE.le]
-  rw [<- quot_max_eq_max_quot]
-  exact sup_le
-}
-
-theorem antisymm_equiv {s : Setoid α} [Semilatticeoid α s] {a b : α} (h₁ : a ≤ b) (h₂ : b ≤ a)
-    : a ≈ b := by {
-  apply Quotient.exact
-  dsimp [LE.le] at h₁ h₂
-  exact antisymm h₁ h₂
-}
-
-end Semilatticeoid
 
 namespace Std.DHashMap
 variable {β : α → Type v} [BEq α] [LawfulBEq α] [Hashable α]

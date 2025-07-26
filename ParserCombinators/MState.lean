@@ -3,6 +3,7 @@
 import Mathlib.Order.Lattice
 import Aesop
 import Mathlib.Control.Bifunctor
+import ParserCombinators.Order
 import ParserCombinators.Util
 import Batteries.Control.AlternativeMonad
 
@@ -49,49 +50,16 @@ instance [Monad μ] [s : Setoid σ] [Semilatticeoid σ s] : MonadStateOf σ (MSt
     let (a, s') := f s
     MStateT.merge a s' s
 
-class abbrev CollectionLike (μ : Type u → Type u) := Monad μ, Alternative μ
-
-instance [Monad μ] [Alternative μ] : CollectionLike μ where
-  failure := Alternative.failure
-  orElse := Alternative.orElse
-
--- Alternatives that yield a semilattice structure
-class SemilatticeAlt (μ : Type u → Type u) extends Alternative μ, LawfulAlternative μ where
-  alt_idem (m : μ α) : (m <|> m) = m
-  alt_comm (m₁ m₂ : μ α) : (m₁ <|> m₂) = (m₂ <|> m₁)
-  alt_assoc (m₁ m₂ m₃ : μ α) : ((m₁ <|> m₂) <|> m₃) = (m₁ <|> m₂ <|> m₃)
-    := symm $ LawfulAlternative.orElse_assoc m₁ m₂ m₃
-
-instance : SemilatticeAlt Option where
-  alt_idem m := by
-    simp [Option.orElse]
-    split <;> simp
-  alt_comm m₁ m₂ := sorry
-
-example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] :=
-  Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap Int (μ (typ t))))
-
--- A semilattice for the memoized types
-instance [Alternative μ] : Max (μ α) where
-  max m₁ m₂ := m₁ <|> m₂
-
-instance [SemilatticeAlt μ] : SemilatticeSup (μ α) :=
-  SemilatticeSup.mk' SemilatticeAlt.alt_comm SemilatticeAlt.alt_assoc SemilatticeAlt.alt_idem
-
-instance [SemilatticeAlt μ] : OrderBot (μ α) where
-  bot := failure
-  bot_le a := by
-    have h : a = failure ⊔ a := symm $ LawfulAlternative.failure_orElse a
-    rw [h]
-    exact SemilatticeSup.le_sup_left failure a
+example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
+  Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap ℕ (μ (typ t))))
 
 -- A semilattice for MemoData
 --
 -- this fixes the tag type
-abbrev MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [CollectionLike μ] :=
-  Std.DHashMap τ (fun t => Std.HashMap Int (μ (typ t)))
+abbrev MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
+  Std.DHashMap τ (fun t => Std.HashMap ℕ (μ (typ t)))
 namespace MemoData
-variable {τ} {typ : τ → Type u} {μ : Type u → Type u} [BEq τ] [Hashable τ] [CollectionLike μ]
+variable {τ} {typ : τ → Type u} {μ : Type u → Type u} [BEq τ] [Hashable τ] [Monad μ]
 
 -- This provides a deliberately coarser equivalence relation over MemoData than `Std.DHashMap.Equiv`.
 @[simp]
@@ -112,12 +80,12 @@ instance : Equivalence (Equiv (μ := μ) (typ := typ)) where
 
 end Equiv
 
-instance setoid (typ : τ → Type u) μ [CollectionLike μ] : Setoid (MemoData typ μ) where
+instance setoid (typ : τ → Type u) μ [Monad μ] : Setoid (MemoData typ μ) where
   r := Equiv
   iseqv := Equiv.instEquivalence
 
-instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] [SemilatticeAlt μ]
-  (typ : τ → Type u)
+instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ]
+  (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)]
     : Max (MemoData typ μ) where
   max a b := a.unionWith (fun _ => Std.HashMap.unionSup) (fun _ => Std.HashMap.emptyWithCapacity) b
 
@@ -134,10 +102,10 @@ private lemma mem_map_Equiv {α : Type u} {β δ : α → Type v} {k : α} {f : 
   · exact mem_map_Equiv_left (Std.DHashMap.Equiv.comm.mp h)
 
 @[inline]
-abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid (α := Int) (β := μ (typ t)))
+abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid (α := ℕ) (β := μ (typ t)))
 
 private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [LawfulBEq τ] [DecidableEq τ]
-  [CollectionLike μ] [SemilatticeAlt μ]
+  [Monad μ] [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
     : Option.map (fun m => hm_quot_mk k m) ((a₁ ⊔ a₂).get? k) = ((a₁.map hm_quot_mk).unionSup (a₂.map hm_quot_mk)).get? k := by
   dsimp [max]
   by_cases h : k ∈ a₁
@@ -220,7 +188,7 @@ private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [La
         apply Std.DHashMap.mem_iff_unionWith_mem.mp at h'
         simp_all
 
-private theorem quot_max_wf [LawfulBEq τ] [SemilatticeAlt μ]
+private theorem quot_max_wf [LawfulBEq τ] [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
   [DecidableEq τ] (a₁ b₁ a₂ b₂ : MemoData typ μ) (h₁ : a₁.Equiv a₂) (h₂ : b₁.Equiv b₂)
     : (Quotient.mk (setoid typ μ) $ a₁ ⊔ b₁) = (Quotient.mk (setoid typ μ) $ a₂ ⊔ b₂) := by
   -- TODO: fix then prove, for speed
@@ -234,12 +202,12 @@ private theorem quot_max_wf [LawfulBEq τ] [SemilatticeAlt μ]
   apply Std.DHashMap.Equiv.get?_eq
   exact Std.DHashMap.unionSup_Equiv h₁ h₂
 
-instance [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] [SemilatticeAlt μ] [DecidableEq τ] : Max (Quotient (setoid typ μ)) where
+instance [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] [∀ t : τ, DecidableEq (typ t)] : Max (Quotient (setoid typ μ)) where
   max q₁ q₂ := by
     refine Quotient.liftOn₂ q₁ q₂ (fun a b => Quotient.mk (setoid typ μ) $ max a b) ?_
     exact id quot_max_wf
 
-instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) : SemilatticeSup (Quotient (setoid typ μ)) := by
+instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)] : SemilatticeSup (Quotient (setoid typ μ)) := by
   refine SemilatticeSup.mk' (α := Quotient (setoid typ μ)) ?_ ?_ ?_
   · sorry -- sup_comm
   · sorry -- sup_assoc
@@ -250,7 +218,7 @@ instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] [Semilattice
     sorry
 
 
-instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [CollectionLike μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) : Semilatticeoid (MemoData typ μ) (setoid typ μ) where
+instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (MemoData typ μ) (setoid typ μ) where
   quot_max_eq_max_quot := by
     dsimp [max]
     sorry
