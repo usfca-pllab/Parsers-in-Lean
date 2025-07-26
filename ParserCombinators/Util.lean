@@ -68,7 +68,7 @@ lemma zip_eq_nil_of_eq_length {α β} {xs : List α} {ys : List β} (h_len : xs.
   · exact List.eq_nil_iff_length_eq_zero.mpr (id (Eq.symm h_len))
 
 -- lemmas for handling List.findSome? instances associated with hash maps.
-private lemma h_findSome?_eq_none {l} (h: k ∉ l) {f : α → β}
+lemma h_findSome?_eq_none {l} (h: k ∉ l) {f : α → β}
   : List.findSome? ((fun x ↦ if x.fst = k then some x.snd else none) ∘ fun k ↦ (k, f k)) l = none
   := by
     apply List.findSome?_eq_none_iff.mpr
@@ -78,7 +78,7 @@ private lemma h_findSome?_eq_none {l} (h: k ∉ l) {f : α → β}
     subst h_x_k
     contradiction
 
-private lemma h_findSome?_eq_none' {β : α → Type v} {l} (h: k ∉ l) {f : (a : α) → β a}
+lemma h_findSome?_eq_none' {β : α → Type v} {l} (h: k ∉ l) {f : (a : α) → β a}
   : List.findSome? ((fun a ↦ if h : a = k then some (congrArg β h ▸ f a) else none)) l = none
   := by
     apply List.findSome?_eq_none_iff.mpr
@@ -88,7 +88,7 @@ private lemma h_findSome?_eq_none' {β : α → Type v} {l} (h: k ∉ l) {f : (a
     subst h_x_k
     contradiction
 
-private lemma h_findSome?_eq_some {l} (h: k ∈ l) {f : α → β}
+lemma h_findSome?_eq_some {l} (h: k ∈ l) {f : α → β}
   : List.findSome? ((fun x ↦ if x.fst = k then some x.snd else none) ∘ fun k ↦ (k, f k)) l = some (f k)
   := by
     induction l with
@@ -105,7 +105,7 @@ private lemma h_findSome?_eq_some {l} (h: k ∈ l) {f : α → β}
           simp_all only [not_true_eq_false]
         | inr h_2 => simp_all only [forall_const]
 
-private lemma h_findSome?_eq_some' {β : α → Type v} {l} (h: k ∈ l) {f : (a : α) → β a}
+lemma h_findSome?_eq_some' {β : α → Type v} {l} (h: k ∈ l) {f : (a : α) → β a}
   : List.findSome? ((fun a ↦ if h : a = k then some (congrArg β h ▸ f a) else none)) l = some (f k)
   := by
     induction l with
@@ -345,6 +345,15 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
         repeat rw [h_findSome?_eq_none h_mem₃]
 }
 
+lemma empty_unionSup_equiv_self (m : Std.HashMap α β) : emptyWithCapacity.unionSup m ~m m := by
+  refine Std.HashMap.Equiv.of_forall_getElem?_eq ?_
+  intro k
+  rw [unionSup_getElem_of_not_contains]
+  · simp
+
+lemma unionSup_empty_equiv_self (m : Std.HashMap α β) : m.unionSup emptyWithCapacity ~m m :=
+  Equiv.trans (unionSup_equiv_comm m emptyWithCapacity) (empty_unionSup_equiv_self m)
+
 -- The Semilattice induced by unionSup
 section Semilattice
 def isSetoid : Setoid (HashMap α β) where
@@ -476,7 +485,7 @@ def unionWith (sup : (a : α) → β a → β a → β a) (bot : (a : α) → β
 
 -- Theorems that show that `unionWith` over a `Semilatticeoid` behaves like a join operation.
 section Semilatticeoid
-variable [(a : α) → SemilatticeSup (β a)] [(a : α) → OrderBot (β a)]
+variable [h_sup : (a : α) → SemilatticeSup (β a)] [h_bot : (a : α) → OrderBot (β a)]
 
 abbrev unionSup (m₁ m₂ : Std.DHashMap α β) : Std.DHashMap α β := unionWith (fun _ => max) (fun _ => ⊥) m₁ m₂
 
@@ -524,9 +533,9 @@ lemma unionSup_equiv_comm (m₁ m₂ : Std.DHashMap α β) : m₁.unionSup m₂ 
     simp [sup_comm]
 }
 
-omit [DecidableEq α] in
-lemma mem_of_unionSup_mem {m₁ m₂ : Std.DHashMap α β} : k ∈ m₁.unionSup m₂ ↔ k ∈ m₁ ∨ k ∈ m₂ := by
-  unfold unionSup unionWith
+omit h_bot h_sup [DecidableEq α] in
+lemma mem_iff_unionWith_mem {m₁ m₂ : Std.DHashMap α β} : k ∈ m₁.unionWith sup bot m₂ ↔ k ∈ m₁ ∨ k ∈ m₂ := by
+  unfold unionWith
   simp [Std.DHashMap.mem_ofList]
 
 lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k ∉ m₁) : (m₁.unionSup m₂).get? k = m₂.get? k := by
