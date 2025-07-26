@@ -14,7 +14,7 @@ def MStateT (σ : Type u) [s : Setoid σ] [Semilatticeoid σ s] (μ : Type u →
   (s : σ) → μ (α × {s' : σ // s ≤ s'})
 
 -- A monotonically-increasing state monad
-abbrev MState (σ : Type u) [s : Setoid σ] [Semilatticeoid σ s] (α : Type u) := MStateT σ Id
+abbrev MState (σ : Type u) [s : Setoid σ] [Semilatticeoid σ s] (α : Type u) := MStateT σ Id α
 
 namespace MStateT
 
