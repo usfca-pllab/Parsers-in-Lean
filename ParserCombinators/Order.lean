@@ -94,7 +94,7 @@ inductive Const (α : Type u) where
   | bot
   | top
   | some (val : α)
-  deriving BEq, Hashable, DecidableEq
+  deriving BEq, Hashable, DecidableEq, Repr
 
 namespace Const
 
