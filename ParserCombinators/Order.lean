@@ -98,6 +98,12 @@ inductive Const (α : Type u) where
 
 namespace Const
 
+instance [ToString α] : ToString (Const α) where
+  toString
+  | bot => "⊥"
+  | top => "⊤"
+  | some a => "some " ++ ToString.toString a
+
 instance : Bot (Const α) where
   bot := bot
 

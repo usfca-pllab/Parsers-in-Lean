@@ -137,6 +137,6 @@ unsafe def parseS : Parser ValidTreeS :=
 end
 
 -- Replacing `#reduce` with `#eval` crashes with a stack overflow
-#reduce ((parseS.run "ab".data).map (fun (tree, _) => tree.val.val)).getD (ParseTree.Leaf a)
+-- #reduce ((parseS.run "ab".data).map (fun (tree, _) => tree.val.val)).getD (ParseTree.Leaf a)
 
 end Example

@@ -50,11 +50,9 @@ abbrev ValidTree := { tree : ParseTree my_cfg // tree.Valid }
 
 -- A set of parsers
 
-#check Subtype
-
 @[simp]
-def parseChar' {μ : Type → Type} [Monad μ] [Alternative μ] [SemilatticeAlt μ] (expected : my_alphabet)
-    : Parser (tag := emptyTag) UChar μ {t : ValidTree // t.val = ParseTree.Leaf expected } := by
+def parseChar' {μ : Type → Type} [Monad μ] [Traversable μ] [SemilatticeAlt μ] (expected : my_alphabet)
+    : ParserM (tag := emptyTag) UChar μ {t : ValidTree // t.val = ParseTree.Leaf expected } := by
   refine Functor.map ?_ $ terminal (String.mk [expected.val])
   let t : ParseTree my_cfg := ParseTree.Leaf expected
   intro
@@ -67,15 +65,15 @@ def parseChar' {μ : Type → Type} [Monad μ] [Alternative μ] [SemilatticeAlt 
     rfl
 
 @[simp]
-def parseA {μ} [Monad μ] [Alternative μ] [SemilatticeAlt μ] := parseChar' (μ := μ) a
+def parseA {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] := parseChar' (μ := μ) a
 
 @[simp]
-def parseB {μ} [Monad μ] [Alternative μ] [SemilatticeAlt μ] := parseChar' (μ := μ) b
+def parseB {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] := parseChar' (μ := μ) b
 
 abbrev ValidTreeS := { t : ValidTree // t.val.nonterminal? = some S }
 
 mutual
-unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] [SemilatticeAlt μ] : Parser (tag := emptyTag) UChar μ ValidTreeS := by
+unsafe def parser1 {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] : ParserM (tag := emptyTag) UChar μ ValidTreeS := by
     refine (pure ?_) <*> parseA <*> parseS
     rintro ⟨t, h⟩ ⟨treeS, hS⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
@@ -105,8 +103,8 @@ unsafe def parser1 {μ} [Monad μ] [Alternative μ] [Traversable μ] [Semilattic
 
     · contradiction
 
-unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] [SemilatticeAlt μ] : Parser (tag := emptyTag) UChar μ ValidTreeS :=
-  let parser2 : Parser UChar μ ValidTreeS := by
+unsafe def parseS {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] : ParserM (tag := emptyTag) UChar μ ValidTreeS :=
+  let parser2 : ParserM UChar μ ValidTreeS := by
     refine ?_ <$> parseA
     rintro ⟨t, h⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a], by decide⟩ [t]
@@ -119,7 +117,7 @@ unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] [Semilattice
     obtain ⟨left, right⟩ := _h
     subst left right
     simp_all only [↓Char.isValue]
-  let parser3 : Parser UChar μ ValidTreeS := by
+  let parser3 : ParserM UChar μ ValidTreeS := by
     refine ?_ <$> parseB
     rintro ⟨t, h⟩
     let root : ParseTree my_cfg := ParseTree.Node S ⟨[term b], by decide⟩ [t]
@@ -134,12 +132,12 @@ unsafe def parseS {μ} [Monad μ] [Alternative μ] [Traversable μ] [Semilattice
     simp_all only [↓Char.isValue]
 
   -- TODO(maemre): try extracting the parser function for building it explicitly
-  (parser1 <|> (parser2 <|> parser3))
+  (parser1 ⊔ (parser2 ⊔ parser3))
 end
 
 #check runParser'
 -- #check (runParser' parseS "ab").1.values.flatten
-#check (runParser' (μ := Option) parseS "ab").1.values
+#check (runParser' (μ := Const) parseS "ab").1.values
 
 -- This breaks due to reaching maximum recursion depth
 -- #reduce (runParser.{1} parseS "ab").1.toList

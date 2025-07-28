@@ -319,6 +319,67 @@ namespace ParseTree
 open CFG
 open Symbol
 
+private def beq {cfg : @CFG α ν} [DecidableEq α] [DecidableEq ν] (tree₁ tree₂ : ParseTree cfg) : Bool :=
+  match tree₁, tree₂ with
+  | Leaf t₁, Leaf t₂ => t₁ = t₂
+  | Node n₁ rule₁ children₁, Node n₂ rule₂ children₂ =>
+      n₁ = n₂ && rule₁.val = rule₂.val && children₁.length = children₂.length
+        && (List.zipWith (fun a b => beq a.val b.val) children₁.attach children₂.attach).and
+  | _, _ => false
+termination_by tree₁
+decreasing_by
+  calc sizeOf a.val < sizeOf children₁ := List.sizeOf_lt_of_mem a.property
+       _ < sizeOf (Node n₁ rule₁ children₁) := by simp +arith
+
+instance {cfg : @CFG α ν} [BEq α] [BEq ν] : BEq (ParseTree cfg) where
+  beq := beq
+
+section DecidableEq
+variable {cfg : @CFG α ν} [BEq α] [DecidableEq α] [BEq ν] [DecidableEq ν]
+
+private lemma beq_rfl {tree : ParseTree cfg} : tree == tree := by match tree with
+  | Leaf t => dsimp [BEq.beq] ; simp [beq]
+  | Node n rule children =>
+      dsimp [BEq.beq]
+      unfold beq
+      simp [List.and]
+      intro subtree h_mem
+      exact beq_rfl
+
+private lemma eq_of_beq {tree₁ tree₂ : ParseTree cfg} (h : beq tree₁ tree₂) : tree₁ = tree₂ := by
+  match tree₁, tree₂ with
+    | Leaf _, Node _ _ _ => simp [beq] at h
+    | Node _ _ _, Leaf _ => simp [beq] at h
+    | Leaf t₁, Leaf t₂ =>
+      simp [beq] at h
+      simp [h]
+    | Node n₁ rule₁ children₁, Node n₂ rule₂ children₂ =>
+      simp [beq] at h
+      simp only [List.and, List.all_eq_true, id] at h
+      have ⟨⟨⟨h_n, h_rule⟩, h_children_len⟩, h_children⟩ := h
+      simp
+      constructor
+      · assumption
+      · constructor
+        · obtain ⟨val, property⟩ := rule₁
+          obtain ⟨val_1, property_1⟩ := rule₂
+          simp at h_rule
+          subst h_n
+          simp [h_rule]
+        · induction children₁ with
+          | nil =>
+            simp at h_children_len
+            symm
+            exact List.eq_nil_of_length_eq_zero $ symm h_children_len
+          | cons head tail ih => sorry
+
+instance : LawfulBEq (ParseTree cfg) where
+  rfl := beq_rfl
+  eq_of_beq := eq_of_beq
+
+instance : DecidableEq (ParseTree cfg) := instDecidableEqOfLawfulBEq
+end DecidableEq
+
 def my_tree₁ : ParseTree my_cfg := Node 1 ⟨[], by decide⟩ []
 def my_tree₂ : ParseTree my_cfg := Leaf a
 def my_tree₃ : ParseTree my_cfg := Node 1 ⟨[nonterm 1, term a], by decide⟩ [
