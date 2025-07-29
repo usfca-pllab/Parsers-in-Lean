@@ -3,6 +3,7 @@ import Mathlib.Order.BoundedOrder.Basic
 import Batteries.Control.AlternativeMonad
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Order.TypeTags
+import Mathlib.Tactic.NthRewrite
 import Aesop
 import Mathlib.Order.BoundedOrder.Lattice
 
@@ -75,16 +76,22 @@ end Semilatticeoid
 -- Alternatives that yield a semilattice structure.
 -- The definitions we use require decidability, so we don't extend `Alternative` but `Applicative`.
 class SemilatticeAlt (μ : Type u → Type u) extends Applicative μ, LawfulApplicative μ where
+  setoid [DecidableEq α] : Setoid (μ α)
+  semilattice_quot [DecidableEq α] : SemilatticeSup (Quotient (setoid (α := α)))
+  order_bot_quot [DecidableEq α] : OrderBot (Quotient (setoid (α := α)))
   failure : μ α
   orElse [DecidableEq α] : μ α → μ α → μ α
-  alt_idem [DecidableEq α] (m : μ α) : (orElse m m) = m
-  alt_comm [DecidableEq α] (m₁ m₂ : μ α) : (orElse m₁ m₂) = (orElse m₂ m₁)
-  alt_assoc [DecidableEq α] (m₁ m₂ m₃ : μ α) : (orElse (orElse m₁ m₂) m₃) = (orElse m₁ (orElse m₂ m₃))
+  alt_idem [DecidableEq α] (m : μ α) : (orElse m m) ≈ m
+  alt_comm [DecidableEq α] (m₁ m₂ : μ α) : (orElse m₁ m₂) ≈ (orElse m₂ m₁)
+  alt_assoc [DecidableEq α] (m₁ m₂ m₃ : μ α) : (orElse (orElse m₁ m₂) m₃) ≈ (orElse m₁ (orElse m₂ m₃))
   -- alternative laws
   map_failure (f : α → β) : f <$> failure = failure
   failure_seq (x : μ α) : (failure : μ (α → β)) <*> x = failure
   orElse_failure [DecidableEq α] (x : μ α) : orElse x failure = x
   failure_orElse [DecidableEq α] (y : μ α) : orElse failure y = y
+  -- semilatticeoid laws
+  quot_max_eq_max_quot [DecidableEq α] (a b : μ α) : (Quotient.mk setoid a) ⊔ ⟦b⟧ = ⟦orElse a b⟧
+  quot_bot_eq_bot_quot [DecidableEq α] : Quotient.mk (setoid (α := α)) failure = ⊥
   -- This is a relaxed version of the relevant law: the original law holds if `f` is a bijection.
   -- We phrase it in terms of `orElse` but it's effectively stating that `Functor.map` is monotonic (?)
   -- f <$> x ⊔ f <$> y ≤ f <$> (x ⊔ y)
@@ -95,14 +102,20 @@ namespace SemilatticeAlt
 instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : Max (μ α) where
   max := orElse
 
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : SemilatticeSup (μ α) :=
-  SemilatticeSup.mk' alt_comm alt_assoc alt_idem
-
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : OrderBot (μ α) where
+instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : Bot (μ α) where
   bot := failure
-  bot_le a := by
-    rw [<- orElse_failure a]
-    apply SemilatticeSup.le_sup_right
+
+instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : SemilatticeSup (@Quotient (μ α) l.setoid) :=
+  l.semilattice_quot
+
+instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : OrderBot (@Quotient (μ α) l.setoid) :=
+  l.order_bot_quot
+
+instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : Semilatticeoid (μ α) l.setoid where
+  bot_repr := failure
+  quot_max_eq_max_quot := l.quot_max_eq_max_quot
+  quot_bot_eq_bot_quot := l.quot_bot_eq_bot_quot
+
 
 instance {α : Type u} (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : OrElse (μ α) where
   orElse x y := SemilatticeAlt.orElse x (y ())
@@ -204,6 +217,62 @@ instance [DecidableEq α] : OrderTop (Const α) where
     rw [h]
     apply SemilatticeInf.inf_le_left
 
+-- Lift the same equations to the identity setoid
+
+instance isSetoid α : Setoid (Const α) := Setoid.mk Eq eq_equivalence
+
+instance instMaxQuot [DecidableEq α] : Max (Quotient (isSetoid α)) where
+  max := by
+    refine Quotient.lift₂ (fun a b => ⟦Max.max a b⟧) ?_
+    simp [isSetoid, instHasEquivOfSetoid]
+
+instance instMinQuot[DecidableEq α] : Min (Quotient (isSetoid α)) where
+  min := by
+    refine Quotient.lift₂ (fun a b => ⟦Min.min a b⟧) ?_
+    simp [isSetoid, instHasEquivOfSetoid]
+
+instance latticeQuot [DecidableEq α] : Lattice (Quotient (isSetoid α)) := by
+  refine Lattice.mk' ?_ ?_ ?_ ?_ ?_ ?_ <;> simp [instMaxQuot, instMinQuot]
+  · apply Quotient.ind₂ ; simp ; exact sup_comm
+  · intros a b c
+    refine Quotient.inductionOn₃ a b c ?_
+    simp
+    exact sup_assoc
+  · apply Quotient.ind₂ ; simp ; exact inf_comm
+  · intros a b c
+    refine Quotient.inductionOn₃ a b c ?_
+    simp
+    exact inf_assoc
+  · apply Quotient.ind₂ ; simp
+  · apply Quotient.ind₂ ; simp
+
+instance [DecidableEq α] : OrderBot (Quotient (isSetoid α)) where
+  bot := ⟦⊥⟧
+  bot_le := by
+    refine Quotient.ind ?_
+    intro a
+    apply left_eq_sup.mp
+    simp [SemilatticeSup.toMax]
+    unfold SemilatticeSup.sup
+    simp only [Lattice.toSemilatticeSup, latticeQuot, Lattice.mk']
+    simp only [SemilatticeSup.mk']
+    unfold Max.max instMaxQuot
+    simp
+
+instance [DecidableEq α] : OrderTop (Quotient (isSetoid α)) where
+  top := ⟦⊤⟧
+  le_top := by
+    refine Quotient.ind ?_
+    intro a
+    apply left_eq_sup.mp
+    simp [SemilatticeSup.toMax]
+    unfold SemilatticeSup.sup
+    simp only [Lattice.toSemilatticeSup, latticeQuot, Lattice.mk']
+    simp only [SemilatticeSup.mk']
+    unfold Max.max instMaxQuot
+    simp
+
+
 instance : Monad Const where
   pure := some
   bind
@@ -256,6 +325,19 @@ instance : SemilatticeAlt Const where
       dsimp [max]
       by_cases h : x = y <;> simp_all
       constructor <;> apply le_top
+  setoid {α} := isSetoid α
+  semilattice_quot := inferInstance
+  order_bot_quot := inferInstance
+  quot_bot_eq_bot_quot := by
+    dsimp [Bot.bot]
+    intros
+    rfl
+  quot_max_eq_max_quot := by
+    dsimp [SemilatticeSup.toMax]
+    unfold SemilatticeSup.sup
+    simp only [Lattice.toSemilatticeSup, latticeQuot, Lattice.mk']
+    simp only [SemilatticeSup.mk']
+    simp only [instMaxQuot, Quotient.lift_mk, implies_true]
 
 instance : Traversable Const where
   traverse f
