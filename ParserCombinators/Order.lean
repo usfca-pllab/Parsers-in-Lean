@@ -11,41 +11,64 @@ import Mathlib.Order.BoundedOrder.Lattice
 -- A `Semilatticeoid` is a type that can be quotiened into a semilattice structure
 --
 -- We also require a `Max` implementation that abides by the quotient structure
-class Semilatticeoid α (s : Setoid α) extends SemilatticeSup (Quotient s), Max α where
-  quot_max_eq_max_quot (a b : α) : SemilatticeSup.sup (α := Quotient s) ⟦a⟧ ⟦b⟧ = ⟦a ⊔ b⟧
+class Semilatticeoid α (s : Setoid α) extends SemilatticeSup (Quotient s), OrderBot (Quotient s), Max α where
+  bot_repr : α
+  quot_max_eq_max_quot (a b : α) : (Quotient.mk s a) ⊔ ⟦b⟧ = ⟦a ⊔ b⟧
+  quot_bot_eq_bot_quot : Quotient.mk s bot_repr = Bot.bot (α := Quotient s)
+
+instance [s : Setoid α] [l : Semilatticeoid α s] : Bot α where
+  bot := l.bot_repr
 
 instance [s : Setoid α] [l : Semilatticeoid α s] : Preorder α where
   le a b := ⟦a⟧ ≤ ⟦b⟧
   le_refl a := Preorder.le_refl ⟦a⟧
   le_trans a b c := Preorder.le_trans (α := Quotient s) ⟦a⟧ ⟦b⟧ ⟦c⟧
 
--- the semilattice axioms that can be lifted to `Semilatticeoid` structure
 namespace Semilatticeoid
+-- the semilattice axioms that can be lifted to `Semilatticeoid` structure
+variable {s : Setoid α} [Semilatticeoid α s]
 
-theorem lift_le_sup_left {s : Setoid α} [Semilatticeoid α s] {a b : α} : a ≤ a ⊔ b := by {
+
+theorem bot_eq_bot : Quotient.mk s ⊥ = ⊥ := by {
+  dsimp [Bot.bot]
+  rw [quot_bot_eq_bot_quot]
+}
+
+theorem bot_sup_eq' {a : α} : Quotient.mk s (⊥ ⊔ a) = ⟦a⟧ := by {
+  dsimp [Bot.bot]
+  rw [<- quot_max_eq_max_quot, quot_bot_eq_bot_quot]
+  apply bot_sup_eq
+}
+
+theorem lift_le_sup_left {a b : α} : a ≤ a ⊔ b := by {
   dsimp [LE.le]
   rw [<- quot_max_eq_max_quot]
   exact le_sup_left
 }
 
-theorem lift_le_sup_right {s : Setoid α} [Semilatticeoid α s] {a b : α} : b ≤ a ⊔ b := by {
+theorem lift_le_sup_right {a b : α} : b ≤ a ⊔ b := by {
   dsimp [LE.le]
   rw [<- quot_max_eq_max_quot]
   exact le_sup_right
 }
 
-theorem lift_sup_le {s : Setoid α} [Semilatticeoid α s] {a b c : α} : a ≤ c → b ≤ c → a ⊔ b ≤ c := by {
+theorem lift_sup_le {a b c : α} : a ≤ c → b ≤ c → a ⊔ b ≤ c := by {
   dsimp [LE.le]
   rw [<- quot_max_eq_max_quot]
   exact sup_le
 }
 
-theorem antisymm_equiv {s : Setoid α} [Semilatticeoid α s] {a b : α} (h₁ : a ≤ b) (h₂ : b ≤ a)
+theorem antisymm_equiv {a b : α} (h₁ : a ≤ b) (h₂ : b ≤ a)
     : a ≈ b := by {
   apply Quotient.exact
   dsimp [LE.le] at h₁ h₂
   exact antisymm h₁ h₂
 }
+
+-- additional theorems
+theorem lift_sup_comm  {a b : α} : Quotient.mk s (a ⊔ b) = Quotient.mk s (b ⊔ a) := by
+  repeat rw [<- quot_max_eq_max_quot]
+  exact sup_comm ⟦a⟧ ⟦b⟧
 
 end Semilatticeoid
 

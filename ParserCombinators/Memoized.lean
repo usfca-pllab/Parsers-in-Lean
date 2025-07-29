@@ -26,23 +26,23 @@ abbrev UString := ULift String
 def liftA2 {F : Type u → Type v} [Applicative F] {α β γ : Type u} (f : α → β → γ) (fa : F α) (fb : F β) : F γ :=
   f <$> fa <*> fb
 
-def joinUnderCache {γ} [Max (μ γ)] [Bot (μ γ)] [Monad μ] (s1 s2 : MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap ℕ (μ γ)))
-    : MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap ℕ (μ γ)) :=
+def joinUnderCache {γ} [Max (μ γ)] [Bot (μ γ)] [Monad μ] (s1 s2 : MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap (Range ℕ) (μ γ)))
+    : MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap (Range ℕ) (μ γ)) :=
   liftA2 (fun m1 m2 => Std.HashMap.unionSup m1 m2) s1 s2
 
 -- Some of the α's here should become existential/hidden
 abbrev Parser
   {τ} {tag : τ → Type u} [BEq τ] [LawfulBEq τ] [Hashable τ] [DecidableEq τ] [∀ t : τ, DecidableEq (tag t)]
   (β : Type u) (μ : Type u → Type u) [Monad μ] [SemilatticeAlt μ] (α : Type u) :=
-  ℕ → MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap ℕ (μ α))
+  ℕ → MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap (Range ℕ) (μ α))
 
 namespace Parser
 variable [Monad μ] [Traversable μ]
 def bind [DecidableEq β'] (x : Parser (tag := tag) β μ α) (f : α → Parser (tag := tag) β μ β')
   := fun pos => do
     let pivotToResult ← x pos
-    let actions : List (μ (MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap ℕ (μ β')))) :=
-      pivotToResult.toList.map (fun (j, ma) => (fun a => f a j) <$> ma)
+    let actions : List (μ (MStateT (MemoData tag μ) (ReaderM (Array β)) (Std.HashMap (Range ℕ) (μ β')))) :=
+      pivotToResult.toList.map (fun ((j : Range ℕ), ma) => (fun a => f a j.toProd.2) <$> ma)
     actions.foldl
       (Traversable.foldl joinUnderCache)
       (pure Std.HashMap.emptyWithCapacity)
@@ -59,7 +59,7 @@ instance [Monad μ] : Functor (Parser (tag := tag) β μ) where
 -- N.B. Have to define `pure` separately so that we can use it in `seq`
 -- Defines the ability to create the simplest parser possible
 instance [Monad μ] : Pure (Parser (tag := tag) β μ) where
-  pure a := fun pos => pure {(pos, pure a)}
+  pure a := fun pos => pure {(Range.empty pos, pure a)}
 
 -- Deep embedding of Monad for parsers.
 --
@@ -106,20 +106,20 @@ end ParserM
 
 open ParserM (lift lower)
 
-def epsilon [Monad μ] : ParserM (tag := tag) β μ PUnit := lift $ fun pos => pure {(pos, pure $ PUnit.unit)}
+def epsilon [Monad μ] : ParserM (tag := tag) β μ PUnit := lift $ fun pos => pure {(Range.empty pos, pure $ PUnit.unit)}
 
 def terminal [Monad μ] (s : String) : ParserM (tag := tag) UChar μ UString := lift $ fun pos => do
   let input ← read
   if pos >= 0 && (s.data.map ULift.up).toArray.isPrefixOf (input.extract pos) then
     let endPos := pos + s.length
-    pure {(endPos, pure $ ULift.up s)}
+    pure {(⟨(pos, endPos), Nat.le_add_right pos s.length⟩, pure $ ULift.up s)}
   else
     pure Std.HashMap.emptyWithCapacity
 
 def terminal' [Monad μ] (t: β) : ParserM (tag := tag) β μ β := lift $ fun pos => do
   let input ← read
   if pos >= 0 && some t == input[pos]? then
-    pure {(pos + 1, pure t)}
+    pure {(⟨(pos, pos + 1), Nat.le_add_right pos 1⟩, pure t)}
   else
     pure Std.HashMap.emptyWithCapacity
 
@@ -166,12 +166,12 @@ partial def memoize [Monad μ] [Traversable μ] [DecidableEq α] (g : ((t : τ) 
 
 -- Will use `Const` as the concrete monad (some is success, ⊥ is failure, ⊤ is ambiguity)
 
-def runParser [Monad μ] [Traversable μ] [DecidableEq α] (p : ParserM (tag := tag) β μ α) (input : Array β) (pos : ℕ := 0) : (Std.HashMap ℕ (μ α)) × MemoData tag μ :=
+def runParser [Monad μ] [Traversable μ] [DecidableEq α] (p : ParserM (tag := tag) β μ α) (input : Array β) (pos : ℕ := 0) : (Std.HashMap (Range ℕ) (μ α)) × MemoData tag μ :=
   let stateTResult := (p.lower pos).run startState
   let readerResult := stateTResult.run input
   readerResult
 
-def runParser' [Monad μ] [Traversable μ] [DecidableEq α] (p : ParserM (tag := tag) UChar μ α) (input : String) (pos : ℕ := 0) : (Std.HashMap ℕ (μ α)) × MemoData tag μ :=
+def runParser' [Monad μ] [Traversable μ] [DecidableEq α] (p : ParserM (tag := tag) UChar μ α) (input : String) (pos : ℕ := 0) : (Std.HashMap (Range ℕ) (μ α)) × MemoData tag μ :=
   runParser p (input.toList.map ULift.up).toArray pos
 
 def emptyTag : PUnit → Type := fun _ => PUnit
@@ -183,7 +183,7 @@ instance (t : PUnit) : DecidableEq (emptyTag t) := by
 def runParserO {μ : Type → Type} {α : Type} [Monad μ] [SemilatticeAlt μ]
   [Traversable μ] [DecidableEq α]
   (p : ParserM (tag := emptyTag) UChar μ α) (input : String) (pos : ℕ := 0)
-    : (Std.HashMap ℕ (μ α)) × MemoData emptyTag μ :=
+    : (Std.HashMap (Range ℕ) (μ α)) × MemoData emptyTag μ :=
   runParser'.{0} p input pos
 
 -- Checking to make sure that runParser has correct type
@@ -323,7 +323,7 @@ def memo' {τ} [Monad μ] [Traversable μ] (g : (τ → ParserM (tag := tag) β 
 
 -- this just defines a subset-like relation on the parse results, the details of implementation
 -- aren't that crucial
-def subsumed [Monad μ] [Traversable μ] [DecidableEq α] (a b : Std.HashMap ℕ (μ α)) : Prop :=
+def subsumed [Monad μ] [Traversable μ] [DecidableEq α] (a b : Std.HashMap (Range ℕ) (μ α)) : Prop :=
   ∀ k (h : k ∈ a), (a[k]'h ⊔ b[k]?.getD ⊥) = b[k]?.getD ⊥
 
 infix:50 " ≼ " => subsumed
@@ -347,7 +347,7 @@ def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const 
       refine concat (terminal "b") (recur 0)
   ) (0 : Fin 2)
 
-#guard (runParser' mutualRecMemo "ababc").1.toList == [(5, Const.some { down := "ababc" })]
+#guard (runParser' mutualRecMemo "ababc").1.toList == [(⟨(0, 5), by decide⟩, Const.some { down := "ababc" })]
 
 
 -- S -> S a | a

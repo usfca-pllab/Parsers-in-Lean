@@ -4,6 +4,7 @@ import Mathlib.Data.List.Basic
 import Mathlib.Algebra.Group.Defs
 import Mathlib.Order.Lattice
 import Mathlib.Order.BoundedOrder.Basic
+import ParserCombinators.Order
 
 universe u v
 variable {α : Type u} [DecidableEq α]
@@ -69,7 +70,7 @@ lemma zip_eq_nil_of_eq_length {α β} {xs : List α} {ys : List β} (h_len : xs.
 
 -- lemmas for handling List.findSome? instances associated with hash maps.
 lemma h_findSome?_eq_none {l} (h: k ∉ l) {f : α → β}
-  : List.findSome? ((fun x ↦ if x.fst = k then some x.snd else none) ∘ fun k ↦ (k, f k)) l = none
+  : List.findSome? (fun x ↦ if x = k then some (f x) else none) l = none
   := by
     apply List.findSome?_eq_none_iff.mpr
     intro x h_mem
@@ -89,7 +90,7 @@ lemma h_findSome?_eq_none' {β : α → Type v} {l} (h: k ∉ l) {f : (a : α) �
     contradiction
 
 lemma h_findSome?_eq_some {l} (h: k ∈ l) {f : α → β}
-  : List.findSome? ((fun x ↦ if x.fst = k then some x.snd else none) ∘ fun k ↦ (k, f k)) l = some (f k)
+  : List.findSome? (fun x ↦ if x = k then some (f x) else none) l = some (f k)
   := by
     induction l with
     | nil => contradiction
@@ -136,9 +137,79 @@ def unionSup (m₁ m₂ : Std.HashMap α β) : Std.HashMap α β :=
 
 end unionSup
 
-variable [SemilatticeSup β] [OrderBot β]
+variable [s : Setoid β] [Semilatticeoid β s]
 
-lemma unionSup_equiv_idem (m : Std.HashMap α β) : m.unionSup m ~m m := by {
+/--
+A relaxed equivalence relation that checks whether the value of each key is equivalent rather
+than equal.
+-/
+def EquivQuot (m₁ m₂ : Std.HashMap α β) : Prop :=
+  map (fun _ => Quotient.mk s) m₁ ~m map (fun _ => Quotient.mk s) m₂
+
+@[inherit_doc]
+scoped infixl:50 " ~q " => EquivQuot
+
+namespace EquivQuot
+
+omit [DecidableEq α] [Semilatticeoid β s]
+
+section BasicTheorems
+omit [LawfulBEq α]
+
+theorem refl (m : Std.HashMap α β) : m ~q m := by
+  simp [EquivQuot]
+
+theorem symm {m₁ m₂ : Std.HashMap α β} : m₁ ~q m₂ → m₂ ~q m₁ := by
+  simp [EquivQuot]
+  apply Std.HashMap.Equiv.comm.mp
+
+theorem trans {m₁ m₂ m₃ : Std.HashMap α β} : m₁ ~q m₂ → m₂ ~q m₃ → m₁ ~q m₃ := by
+  simp [EquivQuot]
+  apply Std.HashMap.Equiv.trans
+
+end BasicTheorems
+
+theorem mem_iff {m₁ m₂ : Std.HashMap α β} (h : m₁ ~q m₂) {k : α} : k ∈ m₁ ↔ k ∈ m₂ := by
+  unfold EquivQuot at h
+  constructor
+  · intro h_mem
+    apply mem_map.mp $ (Equiv.mem_iff h).mp (mem_map.mpr h_mem)
+  · intro h_mem
+    apply mem_map.mp $ (Equiv.mem_iff h).mpr (mem_map.mpr h_mem)
+
+theorem getElem_eq [EquivBEq α] [LawfulHashable α] {k : α} (hk : k ∈ m₁) (h : m₁ ~q m₂) :
+    Quotient.mk s m₁[k] = Quotient.mk s (m₂[k]'(h.mem_iff.mp hk)) := by
+  dsimp [EquivQuot] at h
+  have hk' : k ∈ map (fun x ↦ Quotient.mk s) m₁ := by simp [hk]
+  have hk'' : k ∈ map (fun x ↦ Quotient.mk s) m₂ := by apply (Equiv.mem_iff h).mp hk'
+  have h' : (map (fun x ↦ Quotient.mk s) m₁)[k] = (map (fun x ↦ Quotient.mk s) m₂)[k] := by
+    apply Equiv.getElem_eq hk' h
+  simp [-Quotient.eq] at h'
+  exact h'
+
+theorem getElem?_eq [EquivBEq α] [LawfulHashable α] {m₁ m₂ : Std.HashMap α β} {k : α} (h : m₁ ~q m₂) :
+    Option.map (Quotient.mk s) m₁[k]? = Option.map (Quotient.mk s) m₂[k]? := by
+  by_cases h₁ : k ∈ m₁
+  · simp [h₁, (mem_iff h).mp h₁, -Quotient.eq]
+    exact getElem_eq h₁ h
+  · have h₂ : k ∉ m₂ := by
+      intro contra
+      apply h₁ $ (mem_iff h).mpr contra
+    simp [h₁, h₂]
+
+theorem getD_eq [EquivBEq α] [LawfulHashable α] {m₁ m₂ : Std.HashMap α β} {k : α} (h : m₁ ~q m₂) :
+    Quotient.mk s (m₁.getD k fallback) = Quotient.mk s (m₂.getD k fallback) := by
+  by_cases h₁ : k ∈ m₁
+  · simp [<- getElem_eq_getD, h₁, (mem_iff h).mp h₁, -Quotient.eq]
+    exact getElem_eq h₁ h
+  · have h₂ : k ∉ m₂ := by
+      intro contra
+      apply h₁ $ (mem_iff h).mpr contra
+    simp [getD_eq_fallback, h₁, h₂]
+
+end EquivQuot
+
+lemma unionSup_equiv_idem (m : Std.HashMap α β) : m.unionSup m ~q m := by {
   unfold unionSup
   refine Std.HashMap.Equiv.of_forall_getElem?_eq ?_
   intro k
@@ -147,10 +218,11 @@ lemma unionSup_equiv_idem (m : Std.HashMap α β) : m.unionSup m ~m m := by {
   by_cases h_mem : k ∈ m
   · simp [h_mem]
     simp [<- List.map_reverse, List.findSome?_map]
+    unfold Function.comp
+    simp
     rw [h_findSome?_eq_some]
-    · simp
-      symm
-      apply HashMap.getElem_eq_getD
+    · simp only [Option.some.injEq, <- Semilatticeoid.quot_max_eq_max_quot, sup_idem]
+      rw [HashMap.getElem_eq_getD]
     · simp [h_mem]
   · rw [Std.HashMap.getElem?_eq_none h_mem]
     simp [List.findSome?_eq_none_iff]
@@ -159,22 +231,32 @@ lemma unionSup_equiv_idem (m : Std.HashMap α β) : m.unionSup m ~m m := by {
     contradiction
 }
 
-lemma unionSup_equiv_comm (m₁ m₂ : Std.HashMap α β) : m₁.unionSup m₂ ~m m₂.unionSup m₁ := by {
+lemma unionSup_equiv_comm (m₁ m₂ : Std.HashMap α β) : m₁.unionSup m₂ ~q m₂.unionSup m₁ := by {
   unfold unionSup
   refine Std.HashMap.Equiv.of_forall_getElem?_eq ?_
   intro k
   simp [Std.HashMap.ofList_eq_insertMany_empty]
   simp [Std.HashMap.getElem?_insertMany_list]
   simp [<- List.map_reverse, List.findSome?_map]
-
+  unfold Function.comp
+  simp
   by_cases h_mem₁ : k ∈ m₁.keys.reverse
   · by_cases h_mem₂ : k ∈ m₂.keys.reverse
     · repeat rw [h_findSome?_eq_some h_mem₁, h_findSome?_eq_some h_mem₂]
-      simp [sup_comm]
-    · repeat rw [h_findSome?_eq_none h_mem₂]
-      simp [sup_comm]
+      simp [-Quotient.eq]
+      repeat rw [<-Semilatticeoid.quot_max_eq_max_quot, sup_comm]
+    · repeat rw [h_findSome?_eq_some h_mem₁, h_findSome?_eq_none h_mem₂]
+      simp [-Quotient.eq]
+      repeat rw [<-Semilatticeoid.quot_max_eq_max_quot, sup_comm]
   · repeat rw [h_findSome?_eq_none h_mem₁]
-    simp [sup_comm]
+    simp [-Quotient.eq]
+    unfold Function.comp
+    simp
+    apply congrFun
+    apply congrArg
+    apply funext
+    intro x
+    rw [Semilatticeoid.lift_sup_comm]
 }
 
 omit [DecidableEq α] in
@@ -182,16 +264,22 @@ lemma mem_of_unionSup_mem {m₁ m₂ : Std.HashMap α β} : k ∈ m₁.unionSup 
   unfold unionSup
   simp [Std.HashMap.mem_ofList]
 
-lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.HashMap α β) (h : k ∉ m₁) : (m₁.unionSup m₂)[k]? = m₂[k]? := by
+lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.HashMap α β) (h : k ∉ m₁)
+    : Option.map (Quotient.mk s) (m₁.unionSup m₂)[k]? = Option.map (Quotient.mk s) m₂[k]? := by
   unfold unionSup
   simp [Std.HashMap.ofList_eq_insertMany_empty]
   simp [Std.HashMap.getElem?_insertMany_list]
   simp [<- List.map_reverse, List.findSome?_map]
+  unfold Function.comp
+  simp
   rw [h_findSome?_eq_none (l := m₁.keys.reverse)]
   · simp
+    unfold Function.comp
+    simp
     by_cases h₂ : k ∈ m₂
     · rw [h_findSome?_eq_some]
       · simp [getD_eq_fallback h]
+        rw [Semilatticeoid.bot_sup_eq']
         simp [h₂, <- getElem_eq_getD]
       · simp [h₂]
     · rw [h_findSome?_eq_none]
@@ -200,75 +288,84 @@ lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.HashMap α β) (h : k �
   · simp [h]
 
 lemma unionSup_getElem_both {m₁ m₂ : Std.HashMap α β} (h₁ : k ∈ m₁) (h₂ : k ∈ m₂)
-    : (m₁.unionSup m₂)[k]? = m₁[k] ⊔ m₂[k] := by
+    : Option.map (Quotient.mk s) (m₁.unionSup m₂)[k]? = some (⟦m₁[k]⟧ ⊔ ⟦m₂[k]⟧) := by
   unfold unionSup
   simp [Std.HashMap.ofList_eq_insertMany_empty]
   simp [Std.HashMap.getElem?_insertMany_list]
   simp [<- List.map_reverse, List.findSome?_map]
+  unfold Function.comp
+  simp
   rw [h_findSome?_eq_some (l := m₂.keys.reverse)]
   · simp [<- getElem_eq_getD, h₁, h₂]
+    use m₁[k] ⊔ m₂[k]
+    simp [Semilatticeoid.quot_max_eq_max_quot]
   · simp_all
 
 lemma unionSup_getD_of_not_contains (m₁ m₂ : Std.HashMap α β) (h : k ∉ m₁) {fallback}
-    : (m₁.unionSup m₂).getD k fallback = m₂.getD k fallback := by
+    : Quotient.mk s ((m₁.unionSup m₂).getD k fallback) = Quotient.mk s (m₂.getD k fallback) := by
   repeat rw [getD_eq_getD_getElem?]
+  rw [<- Option.getD_map (f := Quotient.mk s)]
   simp [unionSup_getElem_of_not_contains m₁ m₂ h]
 
 lemma unionSup_getD_both {m₁ m₂ : Std.HashMap α β} (h₁ : k ∈ m₁) (h₂ : k ∈ m₂)
-    : (m₁.unionSup m₂).getD k ⊥ = m₁[k] ⊔ m₂[k] := by
+    : Quotient.mk s ((m₁.unionSup m₂).getD k ⊥) = ⟦m₁[k] ⊔ m₂[k]⟧ := by
   repeat rw [getD_eq_getD_getElem?]
   unfold unionSup
   simp [Std.HashMap.ofList_eq_insertMany_empty]
   simp [Std.HashMap.getElem?_insertMany_list]
   simp [<- List.map_reverse, List.findSome?_map]
+  unfold Function.comp
+  simp
   rw [h_findSome?_eq_some (l := m₂.keys.reverse)]
   · simp [<- getElem_eq_getD, h₁, h₂]
+    simp [<- Quotient.eq]
   · simp_all
 
-lemma unionSup_get?_of_Equiv_left {m₁ m₁' m₂ : Std.HashMap α β} (h : m₁ ~m m₁') (k : α)
-    : (m₁.unionSup m₂).get? k = (m₁'.unionSup m₂).get? k := by
+lemma unionSup_get?_of_Equiv_left {m₁ m₁' m₂ : Std.HashMap α β} (h : m₁ ~q m₁') (k : α)
+    : Option.map (Quotient.mk s) ((m₁.unionSup m₂).get? k) = Option.map (Quotient.mk s) ((m₁'.unionSup m₂).get? k) := by
   repeat rw [get?_eq_getElem?]
   by_cases h_mem₁ : k ∈ m₁
-  · have h_mem₁' := (Equiv.mem_iff h).mp h_mem₁
+  · have h_mem₁' := (EquivQuot.mem_iff h).mp h_mem₁
     by_cases h_mem₂ : k ∈ m₂
     · simp [unionSup_getElem_both, h_mem₁, h_mem₁', h_mem₂]
-      rw [Equiv.getElem_eq h_mem₁ h]
-    · rw [Equiv.getElem?_eq (unionSup_equiv_comm m₁ m₂)]
-      rw [Equiv.getElem?_eq (unionSup_equiv_comm m₁' m₂)]
+      rw [EquivQuot.getElem_eq h_mem₁ h]
+    · rw [EquivQuot.getElem?_eq (unionSup_equiv_comm m₁ m₂)]
+      rw [EquivQuot.getElem?_eq (unionSup_equiv_comm m₁' m₂)]
       simp [unionSup_getElem_of_not_contains, h_mem₂]
-      rw [Equiv.getElem?_eq h]
-  · have h_mem₁' : k ∉ m₁' := (not_congr (Equiv.mem_iff h)).mp h_mem₁
+      rw [EquivQuot.getElem?_eq h]
+  · have h_mem₁' : k ∉ m₁' := (not_congr (EquivQuot.mem_iff h)).mp h_mem₁
     simp [unionSup_getElem_of_not_contains, h_mem₁, h_mem₁']
 
-lemma unionSup_get?_of_Equiv_right {m₁ m₂ m₂' : Std.HashMap α β} (h : m₂ ~m m₂') (k : α)
-    : (m₁.unionSup m₂).get? k = (m₁.unionSup m₂').get? k := by
+lemma unionSup_get?_of_Equiv_right {m₁ m₂ m₂' : Std.HashMap α β} (h : m₂ ~q m₂') (k : α)
+    : Option.map (Quotient.mk s) ((m₁.unionSup m₂).get? k) = Option.map (Quotient.mk s) ((m₁.unionSup m₂').get? k) := by
   repeat rw [get?_eq_getElem?]
-  rw [Equiv.getElem?_eq (unionSup_equiv_comm m₁ m₂)]
-  rw [Equiv.getElem?_eq (unionSup_equiv_comm m₁ m₂')]
+  rw [EquivQuot.getElem?_eq (unionSup_equiv_comm m₁ m₂)]
+  rw [EquivQuot.getElem?_eq (unionSup_equiv_comm m₁ m₂')]
   repeat rw [<- get?_eq_getElem?]
   exact unionSup_get?_of_Equiv_left h k
 
-lemma unionSup_Equiv_left {m₁ m₁' m₂ : Std.HashMap α β} (h : m₁ ~m m₁')
-    : (m₁.unionSup m₂) ~m (m₁'.unionSup m₂) := by
+lemma unionSup_Equiv_left {m₁ m₁' m₂ : Std.HashMap α β} (h : m₁ ~q m₁')
+    : (m₁.unionSup m₂) ~q (m₁'.unionSup m₂) := by
   apply Equiv.of_forall_getElem?_eq
   intro k
   repeat rw [<- get?_eq_getElem?]
+  simp
   apply unionSup_get?_of_Equiv_left h k
 
-lemma unionSup_Equiv_right {m₁ m₂ m₂' : Std.HashMap α β} (h : m₂ ~m m₂')
-    : (m₁.unionSup m₂) ~m (m₁.unionSup m₂') := by
+lemma unionSup_Equiv_right {m₁ m₂ m₂' : Std.HashMap α β} (h : m₂ ~q m₂')
+    : (m₁.unionSup m₂) ~q (m₁.unionSup m₂') := by
   apply Equiv.of_forall_getElem?_eq
   intro k
   repeat rw [<- get?_eq_getElem?]
+  simp
   apply unionSup_get?_of_Equiv_right h k
 
-lemma unionSup_Equiv {m₁ m₁' m₂ m₂' : Std.HashMap α β} (h₁ : m₁ ~m m₁') (h₂ : m₂ ~m m₂')
-    : (m₁.unionSup m₂) ~m (m₁'.unionSup m₂') :=
+lemma unionSup_Equiv {m₁ m₁' m₂ m₂' : Std.HashMap α β} (h₁ : m₁ ~q m₁') (h₂ : m₂ ~q m₂')
+    : (m₁.unionSup m₂) ~q (m₁'.unionSup m₂') :=
   Equiv.trans (unionSup_Equiv_left h₁) (unionSup_Equiv_right h₂)
 
-
 lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
-    : (m₁.unionSup m₂).unionSup m₃ ~m m₁.unionSup (m₂.unionSup m₃) := by {
+    : (m₁.unionSup m₂).unionSup m₃ ~q m₁.unionSup (m₂.unionSup m₃) := by {
   rw [unionSup]
   nth_rw 3 [unionSup]
   refine Std.HashMap.Equiv.of_forall_getElem?_eq ?_
@@ -276,21 +373,24 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
   simp [Std.HashMap.ofList_eq_insertMany_empty]
   simp [Std.HashMap.getElem?_insertMany_list]
   simp [<- List.map_reverse, List.findSome?_map]
-
+  unfold Function.comp
+  simp
   by_cases h_mem₁ : k ∈ m₁.keys.reverse
   · by_cases h_mem₂ : k ∈ m₂.keys.reverse
     · by_cases h_mem₃ : k ∈ m₃.keys.reverse
       · repeat rw [h_findSome?_eq_some h_mem₃]
-        simp
+        simp [-Quotient.eq]
         rw [h_findSome?_eq_some]
-        · simp_all [unionSup_getD_both, <- getElem_eq_getD, sup_assoc]
+        · simp_all [-Quotient.eq, <- Semilatticeoid.quot_max_eq_max_quot, unionSup_getD_both, <- getElem_eq_getD, sup_assoc]
         · simp_all [mem_of_unionSup_mem]
       · rw [h_findSome?_eq_none h_mem₃]
         repeat rw [h_findSome?_eq_some]
-        · simp_all
-          rw [Equiv.getD_eq $ unionSup_equiv_comm m₂ m₃]
+        · simp_all [-Quotient.eq, <- Semilatticeoid.quot_max_eq_max_quot]
+          rw [EquivQuot.getD_eq $ unionSup_equiv_comm m₂ m₃]
           simp [unionSup_getD_of_not_contains, getD_eq_fallback, h_mem₃]
           simp [unionSup_getD_both, <- getElem_eq_getD, h_mem₁, h_mem₂]
+          rw [Semilatticeoid.bot_eq_bot, sup_bot_eq]
+          rw [Semilatticeoid.quot_max_eq_max_quot]
         · simp_all
         · simp_all [mem_of_unionSup_mem]
         · simp_all [mem_of_unionSup_mem]
@@ -298,8 +398,8 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
       · rw [h_findSome?_eq_some h_mem₃]
         simp_all
         rw [h_findSome?_eq_some]
-        · simp
-          rw [Equiv.getD_eq $ unionSup_equiv_comm m₁ m₂]
+        · simp [-Quotient.eq, <- Semilatticeoid.quot_max_eq_max_quot]
+          rw [EquivQuot.getD_eq $ unionSup_equiv_comm m₁ m₂]
           simp_all [unionSup_getD_of_not_contains]
         · simp_all [mem_of_unionSup_mem]
       · have h_mem₂₃ : k ∉ (m₂.unionSup m₃).keys.reverse := by
@@ -308,8 +408,11 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
           simp [List.mem_reverse, mem_of_unionSup_mem, h_mem₂, h_mem₃]
         rw [h_findSome?_eq_none h_mem₃, h_findSome?_eq_none h_mem₂₃]
         simp_all
+        unfold Function.comp
+        simp only [Option.map_if]
         repeat rw [h_findSome?_eq_some]
-        · rw [Equiv.getD_eq $ unionSup_equiv_comm m₁ m₂]
+        · repeat rw [<- Semilatticeoid.quot_max_eq_max_quot]
+          rw [EquivQuot.getD_eq $ unionSup_equiv_comm m₁ m₂]
           simp_all [unionSup_getD_of_not_contains]
         · simp_all
         · simp_all [mem_of_unionSup_mem]
@@ -319,19 +422,28 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
     · by_cases h_mem₃ : k ∈ m₃.keys.reverse
       · rw [h_findSome?_eq_some h_mem₃]
         simp_all
+        unfold Function.comp
+        simp only [Option.map_if]
         rw [h_findSome?_eq_some]
-        · simp [getD_eq_fallback, h_mem₁]
+        · repeat rw [<- Semilatticeoid.quot_max_eq_max_quot]
+          simp [getD_eq_fallback, h_mem₁]
           simp [unionSup_getD_of_not_contains m₁ m₂ h_mem₁]
           simp [<- getElem_eq_getD, h_mem₂, h_mem₃]
           simp [unionSup_getD_both, h_mem₂, h_mem₃]
+          repeat rw [<- Semilatticeoid.quot_max_eq_max_quot, Semilatticeoid.bot_eq_bot, bot_sup_eq]
         · simp_all [mem_of_unionSup_mem]
       · rw [h_findSome?_eq_none h_mem₃]
         simp_all
+        unfold Function.comp
+        simp only [Option.map_if]
         repeat rw [h_findSome?_eq_some]
-        · rw [unionSup_getD_of_not_contains m₁ m₂ h_mem₁]
-          rw [Equiv.getD_eq (unionSup_equiv_comm m₂ m₃)]
+        · repeat rw [<- Semilatticeoid.quot_max_eq_max_quot]
+          rw [unionSup_getD_of_not_contains m₁ m₂ h_mem₁]
+          rw [EquivQuot.getD_eq (unionSup_equiv_comm m₂ m₃)]
           rw [unionSup_getD_of_not_contains m₃ m₂ h_mem₃]
           simp [getD_eq_fallback, h_mem₁, h_mem₃]
+          repeat rw [Semilatticeoid.bot_eq_bot]
+          rw [bot_sup_eq, sup_bot_eq]
         · simp_all [mem_of_unionSup_mem]
         · simp_all [mem_of_unionSup_mem]
     · have h_mem₁₂ : k ∉ (m₁.unionSup m₂).keys.reverse := by
@@ -340,8 +452,10 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
       repeat rw [h_findSome?_eq_none h_mem₁₂]
       simp
       by_cases h_mem₃ : k ∈ m₃.keys.reverse
-      · repeat rw [h_findSome?_eq_some]
-        · simp_all [getD_eq_fallback]
+      · unfold Function.comp
+        simp only [Option.map_if]
+        repeat rw [h_findSome?_eq_some]
+        · simp_all [getD_eq_fallback, -Quotient.eq, <- Semilatticeoid.quot_max_eq_max_quot, Semilatticeoid.bot_eq_bot]
           simp [unionSup_getD_of_not_contains m₂ m₃ h_mem₂]
         · simp_all [mem_of_unionSup_mem]
         · simp_all
@@ -349,22 +463,26 @@ lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.HashMap α β)
           simp at h_mem₂
           simp at h_mem₃
           simp [List.mem_reverse, mem_of_unionSup_mem, h_mem₂, h_mem₃]
+        unfold Function.comp
+        simp only [Option.map_if]
         repeat rw [h_findSome?_eq_none h_mem₂₃]
         repeat rw [h_findSome?_eq_none h_mem₃]
 }
 
-lemma empty_unionSup_equiv_self (m : Std.HashMap α β) : emptyWithCapacity.unionSup m ~m m := by
+lemma empty_unionSup_equiv_self (m : Std.HashMap α β) : emptyWithCapacity.unionSup m ~q m := by
   refine Std.HashMap.Equiv.of_forall_getElem?_eq ?_
   intro k
+  simp
   rw [unionSup_getElem_of_not_contains]
   · simp
 
-lemma unionSup_empty_equiv_self (m : Std.HashMap α β) : m.unionSup emptyWithCapacity ~m m :=
+lemma unionSup_empty_equiv_self (m : Std.HashMap α β) : m.unionSup emptyWithCapacity ~q m :=
   Equiv.trans (unionSup_equiv_comm m emptyWithCapacity) (empty_unionSup_equiv_self m)
 
 -- The Semilattice induced by unionSup
 section Semilattice
-def isSetoid : Setoid (HashMap α β) where
+
+def isSetoid' : Setoid (HashMap α β) where
   r := Std.HashMap.Equiv
   iseqv := {
     refl := .refl
@@ -372,7 +490,17 @@ def isSetoid : Setoid (HashMap α β) where
     trans := .trans
   }
 
-abbrev QEquiv α β [BEq α] [Hashable α] := @Quotient (HashMap α β) isSetoid
+
+def isSetoid : Setoid (HashMap α β) where
+  r := Std.HashMap.EquivQuot
+  iseqv := {
+    refl := EquivQuot.refl
+    symm := EquivQuot.symm
+    trans := EquivQuot.trans
+  }
+
+abbrev QEquiv α β [BEq α] [LawfulBEq α] [DecidableEq α] [Hashable α] [s : Setoid β] [Semilatticeoid β s]
+  := @Quotient (HashMap α β) isSetoid
 
 instance : Max (QEquiv α β) where
   max q₁ q₂ := by
@@ -407,11 +535,30 @@ instance : OrderBot (QEquiv α β) where
       simp [isSetoid]
       apply Equiv.of_forall_getElem?_eq
       intro k
+      simp
       rw [unionSup_getElem_of_not_contains emptyWithCapacity m]
       simp
     rw [<- h]
     apply SemilatticeSup.le_sup_left
 
+-- HashMaps pointwise extend semilatticeoids.
+
+instance : Max (Std.HashMap α β) where
+  max a b := a.unionSup b
+
+instance : Bot (Std.HashMap α β) where
+  bot := emptyWithCapacity
+
+instance : Semilatticeoid (Std.HashMap α β) isSetoid where
+  quot_max_eq_max_quot := by
+    rw [max]
+    simp [SemilatticeSup.toMax]
+    simp [instSemilatticeSupQEquiv]
+    simp [SemilatticeSup.mk']
+    simp [max]
+  bot_repr := emptyWithCapacity
+  quot_bot_eq_bot_quot := by
+    simp [Bot.bot]
 
 end Semilattice
 end Std.HashMap

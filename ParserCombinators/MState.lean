@@ -5,9 +5,14 @@ import Aesop
 import Mathlib.Control.Bifunctor
 import ParserCombinators.Order
 import ParserCombinators.Util
+import ParserCombinators.Range
 import Batteries.Control.AlternativeMonad
 
 universe u
+
+-- TODO: change Map (Range ℕ) (μ α) to Map ℕ (Map ℕ (μ α))
+--
+-- We need to relax our hashmap equivalence classes anyway, might do it as part of this change.
 
 -- A monotonically-increasing state monad transformer.
 -- The increasing data is given by an abstraction function.
@@ -51,13 +56,13 @@ instance [Monad μ] [s : Setoid σ] [Semilatticeoid σ s] : MonadStateOf σ (MSt
     MStateT.merge a s' s
 
 example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
-  Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap ℕ (μ (typ t))))
+  Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap (Range ℕ) (μ (typ t))))
 
 -- A semilattice for MemoData
 --
 -- this fixes the tag type
 abbrev MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
-  Std.DHashMap τ (fun t => Std.HashMap ℕ (μ (typ t)))
+  Std.DHashMap τ (fun t => Std.HashMap ℕ (Std.HashMap ℕ (μ (typ t))))
 namespace MemoData
 variable {τ} {typ : τ → Type u} {μ : Type u → Type u} [BEq τ] [Hashable τ] [Monad μ]
 
@@ -102,7 +107,12 @@ private lemma mem_map_Equiv {α : Type u} {β δ : α → Type v} {k : α} {f : 
   · exact mem_map_Equiv_left (Std.DHashMap.Equiv.comm.mp h)
 
 @[inline]
-abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid (α := ℕ) (β := μ (typ t)))
+abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid (α := ℕ) (β := Std.HashMap ℕ (μ (typ t))))
+
+example (k : τ) [LawfulBEq τ] [DecidableEq τ] [s : Setoid (μ (typ k))] [Semilatticeoid (μ (typ k)) s]
+  [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (Std.HashMap ℕ (Std.HashMap ℕ (μ (typ k)))) (Std.HashMap.isSetoid (s := Std.HashMap.isSetoid)) := by
+  infer_instance
+
 
 private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [LawfulBEq τ] [DecidableEq τ]
   [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
