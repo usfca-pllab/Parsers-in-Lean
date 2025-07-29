@@ -499,13 +499,26 @@ lemma unionSup_equiv_comm (m₁ m₂ : Std.DHashMap α β) : m₁.unionSup m₂ 
     simp [sup_comm]
 }
 
-omit h_bot h_sup [DecidableEq α] in
-lemma mem_iff_unionWith_mem {m₁ m₂ : Std.DHashMap α β} : k ∈ m₁.unionWith sup bot m₂ ↔ k ∈ m₁ ∨ k ∈ m₂ := by
-  unfold unionWith
-  simp [Std.DHashMap.mem_ofList]
-
-lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k ∉ m₁) : (m₁.unionSup m₂).get? k = m₂.get? k := by
+omit [DecidableEq α] in
+lemma mem_of_unionSup_mem {m₁ m₂ : Std.DHashMap α β} : k ∈ m₁.unionSup m₂ ↔ k ∈ m₁ ∨ k ∈ m₂ := by
   unfold unionSup unionWith
+  simp
+
+omit h_bot h_sup in
+lemma unionWith_getElem_both {m₁ m₂ : Std.DHashMap α β} (h₁ : k ∈ m₁) (h₂ : k ∈ m₂)
+    : ((m₁.unionWith f z m₂).get? k) = f k (m₁.get k h₁) (m₂.get k h₂) := by
+  unfold unionWith
+  simp [Std.DHashMap.ofList_eq_insertMany_empty]
+  simp [Std.DHashMap.get?_insertMany_list]
+  simp [<- List.map_reverse, List.findSome?_map]
+  unfold Function.comp
+  rw [h_findSome?_eq_some' (l := m₂.keys.reverse)]
+  · simp [<- get_eq_getD, h₁, h₂]
+  · simp_all
+
+omit h_bot h_sup in
+lemma unionWith_getElem_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k ∉ m₁) : (m₁.unionWith f z m₂).get? k = f k (z k) <$> m₂.get? k := by
+  unfold unionWith
   simp [Std.DHashMap.ofList_eq_insertMany_empty]
   simp [Std.DHashMap.get?_insertMany_list]
   simp [<- List.map_reverse, List.findSome?_map]
@@ -516,22 +529,35 @@ lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k �
     · rw [h_findSome?_eq_some']
       · simp [getD_eq_fallback h]
         simp [get?_eq_some_get, <- get_eq_getD, h₂]
+
       · simp [h₂]
     · rw [h_findSome?_eq_none']
       · simp [get?_eq_none h₂]
       · simp [h₂]
   · simp [h]
 
-lemma unionSup_getElem_both {m₁ m₂ : Std.DHashMap α β} (h₁ : k ∈ m₁) (h₂ : k ∈ m₂)
-    : ((m₁.unionSup m₂).get? k) = (m₁.get k h₁) ⊔ (m₂.get k h₂) := by
-  unfold unionSup unionWith
+omit h_bot h_sup in
+lemma unionWith_getElem_none (m₁ m₂ : Std.DHashMap α β) (h₁ : k ∉ m₁) (h₂ : k ∉ m₂) : (m₁.unionWith f z m₂).get? k = none := by
+  unfold unionWith
   simp [Std.DHashMap.ofList_eq_insertMany_empty]
   simp [Std.DHashMap.get?_insertMany_list]
-  simp [<- List.map_reverse, List.findSome?_map]
-  unfold Function.comp
-  rw [h_findSome?_eq_some' (l := m₂.keys.reverse)]
-  · simp [<- get_eq_getD, h₁, h₂]
-  · simp_all
+  constructor <;> (intro a h_mem h_k ; subst h_k ; contradiction)
+
+omit h_bot h_sup [DecidableEq α] in
+lemma mem_iff_unionWith_mem {m₁ m₂ : Std.DHashMap α β} : k ∈ m₁.unionWith sup bot m₂ ↔ k ∈ m₁ ∨ k ∈ m₂ := by
+  unfold unionWith
+  simp [Std.DHashMap.mem_ofList]
+
+lemma unionSup_getElem_of_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k ∉ m₁) : (m₁.unionSup m₂).get? k = m₂.get? k := by
+  unfold unionSup
+  rw [unionWith_getElem_not_contains m₁ m₂ h]
+  simp [Functor.map, Option.map]
+  split <;> simp_all only
+
+lemma unionSup_getElem_both {m₁ m₂ : Std.DHashMap α β} (h₁ : k ∈ m₁) (h₂ : k ∈ m₂)
+    : ((m₁.unionSup m₂).get? k) = (m₁.get k h₁) ⊔ (m₂.get k h₂) := by
+  unfold unionSup
+  exact unionWith_getElem_both h₁ h₂
 
 lemma unionSup_getD_of_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k ∉ m₁) {fallback}
     : (m₁.unionSup m₂).getD k fallback = m₂.getD k fallback := by
@@ -585,5 +611,116 @@ lemma unionSup_Equiv_right {m₁ m₂ m₂' : Std.DHashMap α β} (h : m₂ ~m m
 lemma unionSup_Equiv {m₁ m₁' m₂ m₂' : Std.DHashMap α β} (h₁ : m₁ ~m m₁') (h₂ : m₂ ~m m₂')
     : (m₁.unionSup m₂) ~m (m₁'.unionSup m₂') :=
   Equiv.trans (unionSup_Equiv_left h₁) (unionSup_Equiv_right h₂)
+
+lemma unionSup_equiv_assoc (m₁ m₂ m₃ : Std.DHashMap α β)
+    : (m₁.unionSup m₂).unionSup m₃ ~m m₁.unionSup (m₂.unionSup m₃) := by {
+  rw [unionSup]
+  nth_rw 2 [unionSup]
+  unfold unionWith
+  refine Std.DHashMap.Equiv.of_forall_get?_eq ?_
+  intro k
+  simp [Std.DHashMap.ofList_eq_insertMany_empty]
+  simp [Std.DHashMap.get?_insertMany_list]
+  simp [<- List.map_reverse, List.findSome?_map]
+  unfold Function.comp
+  by_cases h_mem₁ : k ∈ m₁.keys.reverse
+  · by_cases h_mem₂ : k ∈ m₂.keys.reverse
+    · by_cases h_mem₃ : k ∈ m₃.keys.reverse
+      · repeat rw [h_findSome?_eq_some' h_mem₃]
+        simp
+        rw [h_findSome?_eq_some']
+        · simp_all [unionSup_getD_both, <- get_eq_getD, sup_assoc]
+        · simp_all [mem_of_unionSup_mem]
+      · rw [h_findSome?_eq_none' h_mem₃]
+        repeat rw [h_findSome?_eq_some']
+        · simp_all
+          rw [Equiv.getD_eq $ unionSup_equiv_comm m₂ m₃]
+          simp [unionSup_getD_of_not_contains, getD_eq_fallback, h_mem₃]
+          simp [unionSup_getD_both, <- get_eq_getD, h_mem₁, h_mem₂]
+        · simp_all
+        · simp_all [mem_of_unionSup_mem]
+        · simp_all [mem_of_unionSup_mem]
+    · by_cases h_mem₃ : k ∈ m₃.keys.reverse
+      · rw [h_findSome?_eq_some' h_mem₃]
+        simp_all
+        rw [h_findSome?_eq_some']
+        · simp
+          rw [Equiv.getD_eq $ unionSup_equiv_comm m₁ m₂]
+          simp_all [unionSup_getD_of_not_contains]
+        · simp_all [mem_of_unionSup_mem]
+      · have h_mem₂₃ : k ∉ (m₂.unionSup m₃).keys.reverse := by
+          simp at h_mem₂
+          simp at h_mem₃
+          simp [List.mem_reverse, mem_of_unionSup_mem, h_mem₂, h_mem₃]
+        rw [h_findSome?_eq_none' h_mem₃, h_findSome?_eq_none' h_mem₂₃]
+        simp_all
+        repeat rw [h_findSome?_eq_some']
+        · rw [Equiv.getD_eq $ unionSup_equiv_comm m₁ m₂]
+          simp_all [unionSup_getD_of_not_contains]
+        · simp_all
+        · simp_all [mem_of_unionSup_mem]
+  · repeat rw [h_findSome?_eq_none' h_mem₁]
+    simp_all
+    by_cases h_mem₂ : k ∈ m₂.keys.reverse
+    · by_cases h_mem₃ : k ∈ m₃.keys.reverse
+      · rw [h_findSome?_eq_some' h_mem₃]
+        simp_all
+        rw [h_findSome?_eq_some']
+        · simp [getD_eq_fallback, h_mem₁]
+          simp [unionSup_getD_of_not_contains m₁ m₂ h_mem₁]
+          simp [<- get_eq_getD, h_mem₂, h_mem₃]
+          simp [unionSup_getD_both, h_mem₂, h_mem₃]
+        · simp_all [mem_of_unionSup_mem]
+      · rw [h_findSome?_eq_none' h_mem₃]
+        simp_all
+        repeat rw [h_findSome?_eq_some']
+        · rw [unionSup_getD_of_not_contains m₁ m₂ h_mem₁]
+          rw [Equiv.getD_eq (unionSup_equiv_comm m₂ m₃)]
+          rw [unionSup_getD_of_not_contains m₃ m₂ h_mem₃]
+          simp [getD_eq_fallback, h_mem₁, h_mem₃]
+        · simp_all [mem_of_unionSup_mem]
+        · simp_all [mem_of_unionSup_mem]
+    · have h_mem₁₂ : k ∉ (m₁.unionSup m₂).keys.reverse := by
+        simp at h_mem₂
+        simp [List.mem_reverse, mem_of_unionSup_mem, h_mem₁, h_mem₂]
+      repeat rw [h_findSome?_eq_none' h_mem₁₂]
+      simp
+      by_cases h_mem₃ : k ∈ m₃.keys.reverse
+      · repeat rw [h_findSome?_eq_some']
+        · simp_all [getD_eq_fallback]
+          simp [unionSup_getD_of_not_contains m₂ m₃ h_mem₂]
+        · simp_all [mem_of_unionSup_mem]
+        · simp_all
+      · have h_mem₂₃ : k ∉ (m₂.unionSup m₃).keys.reverse := by
+          simp at h_mem₂
+          simp at h_mem₃
+          simp [List.mem_reverse, mem_of_unionSup_mem, h_mem₂, h_mem₃]
+        repeat rw [h_findSome?_eq_none' h_mem₂₃]
+        repeat rw [h_findSome?_eq_none' h_mem₃]
+}
+
+
+lemma unionSup_get?_of_get?_eq_left {m₁ m₁' m₂ : Std.DHashMap α β} (k : α) (h : m₁.get? k = m₁'.get? k)
+    : (m₁.unionSup m₂).get? k = (m₁'.unionSup m₂).get? k := by
+  by_cases h_mem₁ : k ∈ m₁
+  · have h_mem₁' : k ∈ m₁' := by
+      apply mem_iff_isSome_get?.mpr
+      rw [<- h]
+      apply mem_iff_isSome_get?.mp h_mem₁
+    by_cases h_mem₂ : k ∈ m₂
+    · simp [unionSup_getElem_both, h_mem₁, h_mem₁', h_mem₂]
+      rw [get?_eq_some_get h_mem₁,get?_eq_some_get h_mem₁'] at h
+      simp_all
+    · rw [Equiv.get?_eq (unionSup_equiv_comm m₁ m₂)]
+      rw [Equiv.get?_eq (unionSup_equiv_comm m₁' m₂)]
+      simp [unionSup_getElem_of_not_contains, h_mem₂]
+      rw [h]
+  · have h_mem₁' : k ∉ m₁' := by
+      intro h_mem₁'
+      apply mem_iff_isSome_get?.mp at h_mem₁'
+      rw [<- h] at h_mem₁'
+      simp at h_mem₁'
+      contradiction
+    simp [unionSup_getElem_of_not_contains, h_mem₁, h_mem₁']
 
 end Std.DHashMap.Semilatticeoid

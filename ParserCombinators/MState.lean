@@ -105,7 +105,7 @@ private lemma mem_map_Equiv {α : Type u} {β δ : α → Type v} {k : α} {f : 
 abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid (α := ℕ) (β := μ (typ t)))
 
 private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [LawfulBEq τ] [DecidableEq τ]
-  [Monad μ] [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
+  [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
     : Option.map (fun m => hm_quot_mk k m) ((a₁ ⊔ a₂).get? k) = ((a₁.map hm_quot_mk).unionSup (a₂.map hm_quot_mk)).get? k := by
   dsimp [max]
   by_cases h : k ∈ a₁
@@ -188,10 +188,17 @@ private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [La
         apply Std.DHashMap.mem_iff_unionWith_mem.mp at h'
         simp_all
 
+private lemma unionWith_quotient_lift' (a₁ a₂ : MemoData typ μ) [LawfulBEq τ] [DecidableEq τ]
+  [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
+    : (Std.DHashMap.map hm_quot_mk (a₁ ⊔ a₂)).Equiv ((a₁.map hm_quot_mk).unionSup (a₂.map hm_quot_mk)) := by
+  apply Std.DHashMap.Equiv.of_forall_get?_eq
+  intro k
+  simp
+  apply unionWith_quotient_lift k a₁ a₂
+
 private theorem quot_max_wf [LawfulBEq τ] [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
   [DecidableEq τ] (a₁ b₁ a₂ b₂ : MemoData typ μ) (h₁ : a₁.Equiv a₂) (h₂ : b₁.Equiv b₂)
     : (Quotient.mk (setoid typ μ) $ a₁ ⊔ b₁) = (Quotient.mk (setoid typ μ) $ a₂ ⊔ b₂) := by
-  -- TODO: fix then prove, for speed
   simp_all only [setoid, Equiv, Quotient.eq]
   apply Std.DHashMap.Equiv.of_forall_get?_eq
   intro k
@@ -202,25 +209,78 @@ private theorem quot_max_wf [LawfulBEq τ] [SemilatticeAlt μ] [∀ t : τ, Deci
   apply Std.DHashMap.Equiv.get?_eq
   exact Std.DHashMap.unionSup_Equiv h₁ h₂
 
-instance [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] [∀ t : τ, DecidableEq (typ t)] : Max (Quotient (setoid typ μ)) where
+section Order
+variable [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)]
+
+omit typ in
+instance : Max (Quotient (setoid typ μ)) where
   max q₁ q₂ := by
     refine Quotient.liftOn₂ q₁ q₂ (fun a b => Quotient.mk (setoid typ μ) $ max a b) ?_
     exact id quot_max_wf
 
-instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)] : SemilatticeSup (Quotient (setoid typ μ)) := by
+private lemma unionWith_get_both {k} (a b : MemoData typ μ) (h₁ : k ∈ a) (h₂ : k ∈ b) failure
+     : (Std.DHashMap.unionWith (fun _ ↦ Std.HashMap.unionSup) (fun _ ↦ Std.HashMap.emptyWithCapacity) a b).getD k failure = some ((a.get k h₁).unionSup (b.get k h₂)) := by
+    rw [Std.DHashMap.getD_eq_getD_get?]
+    rw [Std.DHashMap.unionWith_getElem_both]
+    · simp
+    · exact h₁
+    · exact h₂
+
+private lemma unionWith_get_one {k} (a b : MemoData typ μ) (h₁ : k ∉ a) failure
+     : ((Std.DHashMap.unionWith (fun x ↦ Std.HashMap.unionSup) (fun x ↦ Std.HashMap.emptyWithCapacity) a b).getD k failure).Equiv (b.getD k failure) := by
+    repeat rw [Std.DHashMap.getD_eq_getD_get?]
+    rw [Std.DHashMap.unionWith_getElem_not_contains]
+    · by_cases h₂ : k ∈ b
+      · simp [Std.DHashMap.get?_eq_some_get, h₂]
+        apply Std.HashMap.empty_unionSup_equiv_self
+      · simp [Std.DHashMap.get?_eq_none, h₂]
+    · exact h₁
+
+instance : SemilatticeSup (Quotient (setoid typ μ)) := by
+  have h := unionWith_quotient_lift (typ := typ) (μ := μ)
+  have h' := unionWith_quotient_lift' (typ := typ) (μ := μ)
+  unfold hm_quot_mk at h
   refine SemilatticeSup.mk' (α := Quotient (setoid typ μ)) ?_ ?_ ?_
-  · sorry -- sup_comm
-  · sorry -- sup_assoc
-  · simp [max]
-    refine Quotient.ind ?_
+  · refine Quotient.ind₂ ?_
+    intro a b
+    unfold max
+    simp [instMaxQuotientSetoid, setoid]
+    apply Std.DHashMap.Equiv.of_forall_get?_eq
+    intro k
+    simp [Std.DHashMap.get?_map]
+    repeat rw [h]
+    apply Std.DHashMap.Equiv.get?_eq
+    apply Std.DHashMap.unionSup_equiv_comm
+  · intro q₁ q₂ q₃
+    refine Quotient.inductionOn₃ q₁ q₂ q₃ ?_
+    intro a b c
+    unfold max
+    simp [instMaxQuotientSetoid, setoid]
+    apply Std.DHashMap.Equiv.of_forall_get?_eq
+    intro k
+    simp [Std.DHashMap.get?_map]
+    repeat rw [h]
+    rw [Std.DHashMap.unionSup_get?_of_Equiv_left (h' a b)]
+    rw [Std.DHashMap.unionSup_get?_of_Equiv_right (h' b c)]
+    apply Std.DHashMap.Equiv.get?_eq
+    apply Std.DHashMap.unionSup_equiv_assoc
+  · refine Quotient.ind ?_
     intro m
-    simp [setoid, Std.DHashMap.isSetoid]
-    sorry
+    unfold max
+    simp [instMaxQuotientSetoid, setoid]
+    apply Std.DHashMap.Equiv.of_forall_get?_eq
+    intro k
+    rw [Std.DHashMap.get?_map]
+    repeat rw [h]
+    apply Std.DHashMap.Equiv.get?_eq
+    apply Std.DHashMap.unionSup_equiv_idem
 
 
-instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ] [SemilatticeAlt μ] [DecidableEq τ] (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (MemoData typ μ) (setoid typ μ) where
+instance (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (MemoData typ μ) (setoid typ μ) where
   quot_max_eq_max_quot := by
-    dsimp [max]
-    sorry
+    unfold SemilatticeSup.sup
+    simp [instSemilatticeSupQuotientSetoid]
+    simp [SemilatticeSup.mk']
+    simp [instMaxQuotientSetoid]
 
-end MemoData
+end MemoData.Order
