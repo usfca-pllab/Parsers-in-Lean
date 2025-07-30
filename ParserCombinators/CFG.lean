@@ -319,12 +319,21 @@ namespace ParseTree
 open CFG
 open Symbol
 
+private lemma List.eq_of_Forall_eq {α} (xs ys : List α) (h : List.Forall₂ Eq xs ys) : xs = ys := by induction xs with
+  | nil => simp_all
+  | cons head tail ih => simp_all
+
+private lemma List.Forall_of_Forall_attach {α} (xs ys : List α) (r : α → α → Prop) (h : List.Forall₂ (fun a b => r a.val b.val) xs.attach ys.attach)
+    : List.Forall₂ r xs ys := by induction xs generalizing ys with
+  | nil => simp_all
+  | cons head tail ih => cases ys <;> simp_all
+
 private def beq {cfg : @CFG α ν} [DecidableEq α] [DecidableEq ν] (tree₁ tree₂ : ParseTree cfg) : Bool :=
   match tree₁, tree₂ with
   | Leaf t₁, Leaf t₂ => t₁ = t₂
   | Node n₁ rule₁ children₁, Node n₂ rule₂ children₂ =>
       n₁ = n₂ && rule₁.val = rule₂.val && children₁.length = children₂.length
-        && (List.zipWith (fun a b => beq a.val b.val) children₁.attach children₂.attach).and
+        && (List.all₂ (fun a b => beq a.val b.val) children₁.attach children₂.attach)
   | _, _ => false
 termination_by tree₁
 decreasing_by
@@ -335,17 +344,9 @@ instance {cfg : @CFG α ν} [BEq α] [BEq ν] : BEq (ParseTree cfg) where
   beq := beq
 
 section DecidableEq
-variable {cfg : @CFG α ν} [BEq α] [DecidableEq α] [BEq ν] [DecidableEq ν]
+variable {cfg : @CFG α ν}
 
-private lemma beq_rfl {tree : ParseTree cfg} : tree == tree := by match tree with
-  | Leaf t => dsimp [BEq.beq] ; simp [beq]
-  | Node n rule children =>
-      dsimp [BEq.beq]
-      unfold beq
-      simp [List.and]
-      intro subtree h_mem
-      exact beq_rfl
-
+set_option maxHeartbeats 10000
 private lemma eq_of_beq {tree₁ tree₂ : ParseTree cfg} (h : beq tree₁ tree₂) : tree₁ = tree₂ := by
   match tree₁, tree₂ with
     | Leaf _, Node _ _ _ => simp [beq] at h
@@ -355,7 +356,6 @@ private lemma eq_of_beq {tree₁ tree₂ : ParseTree cfg} (h : beq tree₁ tree�
       simp [h]
     | Node n₁ rule₁ children₁, Node n₂ rule₂ children₂ =>
       simp [beq] at h
-      simp only [List.and, List.all_eq_true, id] at h
       have ⟨⟨⟨h_n, h_rule⟩, h_children_len⟩, h_children⟩ := h
       simp
       constructor
@@ -366,12 +366,27 @@ private lemma eq_of_beq {tree₁ tree₂ : ParseTree cfg} (h : beq tree₁ tree�
           simp at h_rule
           subst h_n
           simp [h_rule]
-        · induction children₁ with
-          | nil =>
-            simp at h_children_len
-            symm
-            exact List.eq_nil_of_length_eq_zero $ symm h_children_len
-          | cons head tail ih => sorry
+        · clear h
+          have h_dec : sizeOf children₂ ≤ sizeOf (Node n₁ rule₁ children₂) := by simp
+          apply List.eq_of_Forall_eq
+          apply List.Forall_of_Forall_attach
+          refine List.Forall₂.imp ?_ h_children
+          intro a b
+          apply eq_of_beq
+decreasing_by
+  calc sizeOf a.val < sizeOf children₁ := List.sizeOf_lt_of_mem a.property
+       _ < sizeOf (Node n₁ rule₁ children₁) := by simp +arith
+
+variable [BEq α] [BEq ν]
+
+private lemma beq_rfl {tree : ParseTree cfg} : tree == tree := by match tree with
+  | Leaf t => dsimp [BEq.beq] ; simp [beq]
+  | Node n rule children =>
+      dsimp [BEq.beq]
+      unfold beq
+      simp []
+      intro subtree h_mem
+      exact beq_rfl
 
 instance : LawfulBEq (ParseTree cfg) where
   rfl := beq_rfl
