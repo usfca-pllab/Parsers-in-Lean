@@ -128,7 +128,7 @@ namespace Std.HashMap
 variable {β : Type v} [BEq α] [LawfulBEq α] [Hashable α]
 
 section unionSup
-variable [Max β] [Bot β]
+variable [instMax : Max β] [instBot : Bot β]
 
 -- Take the union of `m₁` and `m₂`, merge conflicting values with `⊔`.
 -- The definition doesn't assume a semilattice structure, but the theorems do.
@@ -156,6 +156,7 @@ omit [DecidableEq α] [Semilatticeoid β s]
 section BasicTheorems
 omit [LawfulBEq α]
 
+@[simp]
 theorem refl (m : Std.HashMap α β) : m ~q m := by
   simp [EquivQuot]
 
@@ -543,10 +544,10 @@ instance : OrderBot (QEquiv α β) where
 
 -- HashMaps pointwise extend semilatticeoids.
 
-instance : Max (Std.HashMap α β) where
+instance instMax : Max (Std.HashMap α β) where
   max a b := a.unionSup b
 
-instance : Bot (Std.HashMap α β) where
+instance instBot : Bot (Std.HashMap α β) where
   bot := emptyWithCapacity
 
 instance : Semilatticeoid (Std.HashMap α β) isSetoid where
@@ -677,6 +678,25 @@ lemma unionWith_getElem_not_contains (m₁ m₂ : Std.DHashMap α β) (h : k ∉
       · simp [getD_eq_fallback h]
         simp [get?_eq_some_get, <- get_eq_getD, h₂]
 
+      · simp [h₂]
+    · rw [h_findSome?_eq_none']
+      · simp [get?_eq_none h₂]
+      · simp [h₂]
+  · simp [h]
+
+omit h_bot h_sup in
+lemma unionWith_getElem_not_contains_right (m₁ m₂ : Std.DHashMap α β) (h : k ∉ m₂) : (m₁.unionWith f z m₂).get? k = (f k · (z k)) <$> m₁.get? k := by
+  unfold unionWith
+  simp [Std.DHashMap.ofList_eq_insertMany_empty]
+  simp [Std.DHashMap.get?_insertMany_list]
+  simp [<- List.map_reverse, List.findSome?_map]
+  unfold Function.comp
+  rw [h_findSome?_eq_none' (l := m₂.keys.reverse)]
+  · simp
+    by_cases h₂ : k ∈ m₁
+    · rw [h_findSome?_eq_some']
+      · simp [getD_eq_fallback h]
+        simp [get?_eq_some_get, <- get_eq_getD, h₂]
       · simp [h₂]
     · rw [h_findSome?_eq_none']
       · simp [get?_eq_none h₂]

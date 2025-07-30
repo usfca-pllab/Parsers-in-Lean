@@ -99,19 +99,22 @@ class SemilatticeAlt (μ : Type u → Type u) extends Applicative μ, LawfulAppl
     : orElse (orElse (f <$> x) (f <$> y)) (f <$> orElse x y) = (f <$> orElse x y)
 
 namespace SemilatticeAlt
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : Max (μ α) where
+instance instSetoid {μ : Type u → Type u} [DecidableEq α] [l : SemilatticeAlt μ] : Setoid (μ α) :=
+  l.setoid
+
+instance (priority := low) instMax (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : Max (μ α) where
   max := orElse
 
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : Bot (μ α) where
+instance (priority := low) instBot (μ : Type u → Type u) [DecidableEq α] [SemilatticeAlt μ] : Bot (μ α) where
   bot := failure
 
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : SemilatticeSup (@Quotient (μ α) l.setoid) :=
+instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : SemilatticeSup (@Quotient (μ α) instSetoid) :=
   l.semilattice_quot
 
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : OrderBot (@Quotient (μ α) l.setoid) :=
+instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : OrderBot (@Quotient (μ α) instSetoid) :=
   l.order_bot_quot
 
-instance (priority := low) (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : Semilatticeoid (μ α) l.setoid where
+instance (μ : Type u → Type u) [DecidableEq α] [l : SemilatticeAlt μ] : Semilatticeoid (μ α) instSetoid where
   bot_repr := failure
   quot_max_eq_max_quot := l.quot_max_eq_max_quot
   quot_bot_eq_bot_quot := l.quot_bot_eq_bot_quot
@@ -249,7 +252,7 @@ instance latticeQuot [DecidableEq α] : Lattice (Quotient (isSetoid α)) := by
 instance [DecidableEq α] : OrderBot (Quotient (isSetoid α)) where
   bot := ⟦⊥⟧
   bot_le := by
-    refine Quotient.ind ?_
+    apply Quotient.ind
     intro a
     apply left_eq_sup.mp
     simp [SemilatticeSup.toMax]
