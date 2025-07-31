@@ -163,7 +163,7 @@ variable [Fintype τ]
 instance : LT (Counter τ) where
   lt := Relation.TransGen PLessThan
 
-instance wf : WellFoundedRelation (Counter τ) where
+instance (priority := high) wf : WellFoundedRelation (Counter τ) where
   rel := LT.lt
   wf := by
     apply WellFounded.transGen
@@ -253,40 +253,49 @@ theorem dec_lt_if_not_zero {t : τ} {m : Counter τ} (h : m.unwrap[t]? ≠ some 
   · intro t' h_neq
     simp [Std.HashMap.getElem?_insert, h_neq]
 
+instance : GetElem? (Counter τ) τ ℕ (fun m k => k ∈ m.unwrap) where
+  getElem m k h := m.unwrap[k]
+  getElem? m k := m.unwrap[k]?
+
 end Counter
 
--- TODO(maemre): this is increasing the memoization table, which is a Noetherian lattice.
--- We need to make a termination argument using that.
+-- NOTE: There is a counter for each tag and we saturate it in N steps where N = remaining string
+-- length.  This definition is similar to `withFuel`, and it should work on non-cyclic grammars
+-- as seen in Frost and Hafiz <https://dl.acm.org/doi/10.1145/1149982.1149988>.  This is how we
+-- guarantee that `memoize` terminates.
+
+-- Ideally, we could try for a fixpoint-like approach where our initial results are empty and we
+-- gradually re-run the parser until it saturates? This might get tricky, though.
+
 --
--- We need two more ingredients:
+-- We need one more ingredient:
 --
 -- 1. Each tag has correct data, e.g. t ∈ memo → memo.get? t ⊆ memoize g pos
--- 2. There is a counter for each tag and we saturate it in N steps where N = remaining string
---    length.  This definition is similar to `withFuel`, and it should work on non-cyclic grammars
---    as seen in Frost and Hafiz <https://dl.acm.org/doi/10.1145/1149982.1149988>.
 --
 -- (1) will ensure that we always produce correct results.
--- (2) will ensure that we always terminate.  Ideally, we could try for a fixpoint-like approach
--- where our initial results are empty and we gradually re-run the parser until it saturates?
--- This might get tricky, though.
-partial def memoize [Monad μ] [Traversable μ] [DecidableEq α]
+def memoize [Monad μ] [Traversable μ] [DecidableEq α] [Fintype τ]
   (counter : Counter τ := Counter.empty)
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t)) (t : τ)
     : ParserM (tag := tag) β μ (tag t) :=
-  lift $ fun pos => do
-    let positionMap := (← get).getD t ⊥
-    -- Check if we have cached results for this tag and position
-    match positionMap[pos]? with
-    | some cachedResult => pure cachedResult
-    | none =>
-      -- No cached result for this position, compute and cache
-      let results ← lower (g (memoize counter g) t) pos
-      -- Cache the new results
-      modifyGet $ fun memo =>
-        let positionMap := memo.getD t ⊥
-        let results := results ⊔ positionMap.getD pos ⊥
-        -- TODO: use alter
-        (results, memo.insert t $ positionMap.insert pos results)
+  if h : counter[t]? = some 0 then ⊥
+  else
+    lift $ fun pos => do
+      let positionMap := (← get).getD t ⊥
+      -- Check if we have cached results for this tag and position
+      match positionMap[pos]? with
+      | some cachedResult => pure cachedResult
+      | none =>
+        -- No cached result for this position, compute and cache
+        let results ← lower (g (memoize (counter.dec t ((← read).size - pos)) g) t) pos
+        -- Cache the new results
+        modifyGet $ fun memo =>
+          let positionMap := memo.getD t ⊥
+          let results := results ⊔ positionMap.getD pos ⊥
+          -- TODO: use alter
+          (results, memo.insert t $ positionMap.insert pos results)
+termination_by counter
+decreasing_by
+  apply Counter.dec_lt_if_not_zero h
 
 -- Testing
 
