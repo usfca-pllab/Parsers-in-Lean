@@ -7,6 +7,11 @@ import Std.Data.HashMap.AdditionalOperations
 import Std.Data.HashMap.Lemmas
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Control.Fold
+import Mathlib.Data.ENat.Basic
+import Mathlib.Data.ENat.Defs
+import Mathlib.Data.Fintype.Sets
+import Mathlib.Data.Multiset.DershowitzManna
+import Mathlib.Order.OrderIsoNat
 import Batteries.Control.AlternativeMonad
 import ParserCombinators.MState
 import ParserCombinators.Util
@@ -125,6 +130,131 @@ def terminal' [Monad μ] [DecidableEq β] (t: β) : ParserM (tag := tag) β μ �
   else
     pure Std.HashMap.emptyWithCapacity
 
+/--
+Recursion budget counters for `memoize`. Keeps track of the remaining recursion
+budget for each tag.
+
+If the budget for a tag does not exist, it will be initialized to a finite
+number on first use (e.g., by `dec`).
+
+This allows us to form a `WellFoundedRelation` for finite types.
+-/
+def Counter τ [Hashable τ] [BEq τ] := Std.HashMap τ ℕ
+
+namespace Counter
+variable [Hashable τ] [BEq τ] [LawfulBEq τ] [LawfulHashable τ]
+
+def empty : Counter τ := Std.HashMap.emptyWithCapacity
+
+def unwrap : Counter τ → Std.HashMap τ ℕ := id
+
+/-- The generator of the less-than relation: `a.PLessThan b` if they differ by only one value. -/
+@[simp]
+def PLessThan (a b : Counter τ) : Prop :=
+  ∃ t : τ, (∃ h_a : t ∈ a.unwrap, (h_b : t ∈ b.unwrap) → a.unwrap[t] < b.unwrap[t]) ∧
+    ∀ t' : τ, t ≠ t' → a.unwrap[t']? = b.unwrap[t']?
+
+/-- Convert the counters to a multiset of extended naturals (missing elements are mapped to `⊤`). -/
+noncomputable def toMultiset [fintype : Fintype τ] (a : Counter τ) : Multiset ℕ∞ :=
+  (Multiset.ofList fintype.elems.toList).map (fun t => (NatCast.natCast <$> a.get? t).getD ⊤)
+
+variable [Fintype τ]
+
+instance : LT (Counter τ) where
+  lt := Relation.TransGen PLessThan
+
+instance wf : WellFoundedRelation (Counter τ) where
+  rel := LT.lt
+  wf := by
+    apply WellFounded.transGen
+    apply Subrelation.wf ?_ (InvImage.wf toMultiset Multiset.instWellFoundedisDershowitzMannaLT.wf)
+    simp [Subrelation, WellFoundedRelation.rel]
+    unfold InvImage
+    unfold unwrap id
+    intro a b t h_a h_lt h_eq
+    unfold Multiset.IsDershowitzMannaLT
+    use a.toMultiset - {NatCast.natCast a.unwrap[t]}
+    use {NatCast.natCast a.unwrap[t]}
+    have h_multiset_a : a.toMultiset = a.toMultiset.erase ↑a.unwrap[t] + {↑a.unwrap[t]} := by
+      rw [add_comm]
+      simp
+      rw [Multiset.cons_erase]
+      simp [toMultiset, Fintype.complete]
+      use t
+      simp [h_a, unwrap]
+    have h_a_get_t : (fun x ↦ (Option.map NatCast.natCast a.unwrap[x]?).getD ⊤) t = ENat.instNatCast.natCast a.unwrap[t] := by
+      simp [unwrap, h_a]
+    unfold unwrap id at h_a_get_t
+    by_cases h_b : t ∈ b.unwrap <;> simp [unwrap] at h_b
+    · use {NatCast.natCast b.unwrap[t]}
+      have h_b_get_t : (fun x ↦ (Option.map NatCast.natCast b.unwrap[x]?).getD ENat.instOrderTop.top) t = ↑b.unwrap[t] := by
+        simp [unwrap, h_b]
+      unfold unwrap id at h_b_get_t
+      simp
+      constructor
+      · assumption
+      · constructor
+        · rw [<- Multiset.add_sub_cancel (s := b.toMultiset) (t := {↑ b.unwrap[t]})]
+          · simp [toMultiset, unwrap]
+            rw [<- h_a_get_t]
+            rw [<- h_b_get_t]
+            repeat rw [<- Multiset.map_erase_of_mem] <;> try simp [Fintype.complete]
+            apply Multiset.map_congr (by rfl)
+            intro t'
+            intro h_t'_neq_t
+            rw [<- Finset.erase_val, Finset.mem_val] at h_t'_neq_t
+            simp at h_t'_neq_t
+            have a_get_t'_eq_b_get_t' := h_eq t' $ h_t'_neq_t.left.imp symm
+            rw [a_get_t'_eq_b_get_t']
+          · simp [toMultiset]
+            use t
+            simp [Fintype.complete, h_b, unwrap]
+        · exact h_lt h_b
+    · use {⊤}
+      have h_b_get_t : (fun x ↦ (Option.map NatCast.natCast b.unwrap[x]?).getD ⊤) t = ENat.instOrderTop.top := by
+        simp [unwrap, h_b]
+      unfold unwrap id at h_b_get_t
+      simp
+      constructor
+      · assumption
+      · rw [<- Multiset.add_sub_cancel (s := b.toMultiset) (t := {⊤})]
+        · simp [toMultiset, unwrap]
+          rw [<- h_a_get_t]
+          nth_rw 2 [<- h_b_get_t]
+          repeat rw [<- Multiset.map_erase_of_mem] <;> try simp [Fintype.complete]
+          apply Multiset.map_congr (by rfl)
+          intro t'
+          intro h_t'_neq_t
+          rw [<- Finset.erase_val, Finset.mem_val] at h_t'_neq_t
+          simp at h_t'_neq_t
+          have a_get_t'_eq_b_get_t' := h_eq t' $ h_t'_neq_t.left.imp symm
+          rw [a_get_t'_eq_b_get_t']
+        · simp [toMultiset]
+          use t
+          simp [Fintype.complete, h_b]
+
+/-- Decrement the value for the given tag if it exists, otherwise insert given default budget. -/
+def dec (counter : Counter τ) (t : τ) (default : ℕ) : Counter τ :=
+  counter.insert t (counter.getD t default - 1)
+
+set_option linter.unusedSectionVars false in
+omit [DecidableEq τ] [Fintype τ] in
+theorem dec_lt_if_not_zero {t : τ} {m : Counter τ} (h : m.unwrap[t]? ≠ some 0) : m.dec t n < m := by
+  simp [dec, LT.lt]
+  apply Relation.TransGen.single
+  simp_all [unwrap]
+  use t
+  constructor
+  · use Or.symm (Or.inr rfl)
+    · intro h_mem
+      simp [h_mem] at h
+      simp [<- Std.HashMap.getElem_eq_getD, h_mem]
+      exact Nat.zero_lt_of_ne_zero h
+  · intro t' h_neq
+    simp [Std.HashMap.getElem?_insert, h_neq]
+
+end Counter
+
 -- TODO(maemre): this is increasing the memoization table, which is a Noetherian lattice.
 -- We need to make a termination argument using that.
 --
@@ -139,7 +269,10 @@ def terminal' [Monad μ] [DecidableEq β] (t: β) : ParserM (tag := tag) β μ �
 -- (2) will ensure that we always terminate.  Ideally, we could try for a fixpoint-like approach
 -- where our initial results are empty and we gradually re-run the parser until it saturates?
 -- This might get tricky, though.
-partial def memoize [Monad μ] [Traversable μ] [DecidableEq α] (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t)) (t : τ) : ParserM (tag := tag) β μ (tag t) :=
+partial def memoize [Monad μ] [Traversable μ] [DecidableEq α]
+  (counter : Counter τ := Counter.empty)
+  (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t)) (t : τ)
+    : ParserM (tag := tag) β μ (tag t) :=
   lift $ fun pos => do
     let positionMap := (← get).getD t ⊥
     -- Check if we have cached results for this tag and position
@@ -147,7 +280,7 @@ partial def memoize [Monad μ] [Traversable μ] [DecidableEq α] (g : ((t : τ) 
     | some cachedResult => pure cachedResult
     | none =>
       -- No cached result for this position, compute and cache
-      let results ← lower (g (memoize g) t) pos
+      let results ← lower (g (memoize counter g) t) pos
       -- Cache the new results
       modifyGet $ fun memo =>
         let positionMap := memo.getD t ⊥
@@ -159,6 +292,7 @@ partial def memoize [Monad μ] [Traversable μ] [DecidableEq α] (g : ((t : τ) 
 
 -- Will use `Const` as the concrete monad (some is success, ⊥ is failure, ⊤ is ambiguity)
 
+-- TODO: prove that runParser "commutes" with the parser combinators
 def runParser [Monad μ] [Traversable μ] [DecidableEq α] (p : ParserM (tag := tag) β μ α) (input : Array β) (pos : ℕ := 0) : (Std.HashMap ℕ (μ α)) × MemoData tag μ :=
   let stateTResult := (p.lower pos).run startState
   let readerResult := stateTResult.run input
@@ -330,7 +464,7 @@ theorem memo_complete [Monad μ] [Traversable μ] [DecidableEq α] (g : ParserM 
     : ∃ n, (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
   sorry
 
-def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Fin 2) (α := UString) $ fun recur t =>
+def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Fin 2) (α := UString) Counter.empty $ fun recur t =>
   match t with
     | 0 => by
       -- A
@@ -344,7 +478,7 @@ def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const 
 
 
 -- S -> S a | a
-def leftRecMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Unit) (α := UString) $ fun recur (_: Unit) =>
+def leftRecMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Unit) (α := UString) Counter.empty $ fun recur (_: Unit) =>
   concat (recur ()) (terminal "a") ⊔ terminal "a"
   ) ()
 
