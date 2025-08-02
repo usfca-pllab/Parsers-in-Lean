@@ -6,6 +6,7 @@ Parser generation from CFGs.
 
 import ParserCombinators.CFG
 import ParserCombinators.Memoized
+import ParserCombinators.Lemmas
 
 namespace Gen
 
@@ -42,17 +43,31 @@ def gen (cfg : @CFG α ν) : ℕ → ν → ParserM (tag := tag cfg) α μ (Pars
 -- TODO(maemre): correctness theorem (by injecting validity proofs above)
 -- TODO(maemre): correctness theorem (sound/complete)
 
--- abbrev sound (cfg : @CFG α ν) [Membership (ParseTree cfg) (μ (ParseTree cfg))]
---   (n : ν) (p : ParserM (tag := tag cfg) α μ (ParseTree cfg)) (input : Array α)
---   := ∀ tree ∈ (runParser p input).1[(0 : Int)]?.getD failure, tree.Valid ∧ tree.root = Symbol.nonterm n
+abbrev sound (cfg : @CFG α ν) [Membership (ParseTree cfg) (μ (ParseTree cfg))]
+  (n : ν) (p : ParserM (tag := tag cfg) α μ (ParseTree cfg)) (input : Array α)
+  := ∀ tree ∈ (runParser p input).1[0]?.getD ⊥, tree.Valid ∧ tree.root = Symbol.nonterm n
 --
 -- abbrev complete (cfg : @CFG α ν) [Membership (ParseTree cfg) (μ (ParseTree cfg))] (n : ν) (p : Parser (tag := tag cfg) α μ (ParseTree cfg)) (input : Array α)
 --   (h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
 --   := ∃ tree, tree ∈ (runParser p input).1[(0 : Int)]?.getD failure
 
--- omit [BEq α] [DecidableEq α] in
--- lemma failure_empty : (runParser (failure : ParserM (tag := tag) α μ γ) input).1.isEmpty := by
---   rfl
+lemma failure_empty (cfg : @CFG α ν): (runParser (tag := tag cfg) (⊥ : ParserM α μ (ParseTree cfg)) input).1.isEmpty := by
+  simp [Bot.bot, runParser, ReaderT.run, MStateT.run, ParserM.lift, ParserM.lower]
+  unfold Parser.failure Parser.bind Bind.bind
+
+  have h : @Std.HashMap.emptyWithCapacity.toList ℕ (μ (ParseTree cfg)) = [] := by
+    apply List.isEmpty_iff.mp
+    simp [Std.HashMap.isEmpty_emptyWithCapacity, Std.HashMap.isEmpty_toList]
+
+  conv =>
+    lhs
+    enter [1, 1]
+    whnf
+    simp [h]
+    left
+    arg 1
+    whnf
+  simp
 
 -- theorem failure_sound (cfg : @CFG α ν) [Membership (ParseTree cfg) (μ (ParseTree cfg))] (n : ν) (input : Array α) : sound (μ := μ) cfg n failure input
 --   := by
