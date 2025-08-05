@@ -273,7 +273,7 @@ end Counter
 -- 1. Each tag has correct data, e.g. t ∈ memo → memo.get? t ⊆ memoize g pos
 --
 -- (1) will ensure that we always produce correct results.
-def memoize [Monad μ] [Traversable μ] [DecidableEq α] [Fintype τ]
+def memoize [Monad μ] [Traversable μ] [Fintype τ]
   (counter : Counter τ := Counter.empty)
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t)) (t : τ)
     : ParserM (tag := tag) β μ (tag t) :=
@@ -473,7 +473,7 @@ theorem memo_complete [Monad μ] [Traversable μ] [DecidableEq α] (g : ParserM 
     : ∃ n, (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
   sorry
 
-def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Fin 2) (α := UString) Counter.empty $ fun recur t =>
+def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Fin 2) Counter.empty $ fun recur t =>
   match t with
     | 0 => by
       -- A
@@ -487,7 +487,7 @@ def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const 
 
 
 -- S -> S a | a
-def leftRecMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Unit) (α := UString) Counter.empty $ fun recur (_: Unit) =>
+def leftRecMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Unit) Counter.empty $ fun recur (_: Unit) =>
   concat (recur ()) (terminal "a") ⊔ terminal "a"
   ) ()
 
