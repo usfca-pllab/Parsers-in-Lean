@@ -108,6 +108,13 @@ instance [Monad μ] [Traversable μ] [DecidableEq α] : Max (ParserM (tag := tag
 end ParserM
 
 -- TODO: prove that the relevant laws hold for the monad instance
+instance [Monad μ] [Traversable μ] : LawfulMonad (ParserM (tag := tag) β μ) := by
+  refine LawfulMonad.mk' _ ?_ ?_ ?_
+  · sorry
+  · intros
+    simp [Bind.bind, ParserM.bind]
+  · sorry
+
 -- TODO: prove that ParserM is a `SemilatticeSup` + `OrderBot`
 -- TODO: prove that the relevant laws hold for lower/lift
 
