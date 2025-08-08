@@ -17,7 +17,7 @@ axiom memoize_induction
 variable (parser₁ parser₂ : ParserM (tag := tag) β μ α) (input : Array β) [DecidableEq α]
 
 axiom runParser_sup_eq_sup_runParser
-  : (runParser (parser₁ ⊔ parser₂) input).1.EquivQuot ((runParser parser₁ input) ⊔ (runParser parser₂ input)).1
+  : (runParser (parser₁ ⊔ parser₂) input).1.EquivQuot ((runParser parser₁ input).1 ⊔ (runParser parser₂ input).1)
 
 axiom mem_runParser_bind_iff_eq_bind_mem_runParser
   [DecidableEq α']
