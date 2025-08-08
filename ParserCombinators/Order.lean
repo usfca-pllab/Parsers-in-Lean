@@ -4,6 +4,7 @@ import Batteries.Control.AlternativeMonad
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Order.TypeTags
 import Mathlib.Tactic.NthRewrite
+import Mathlib.Data.List.Monad
 import Aesop
 import Mathlib.Order.BoundedOrder.Lattice
 
@@ -94,9 +95,9 @@ class SemilatticeAlt (μ : Type u → Type u) extends Applicative μ, LawfulAppl
   quot_bot_eq_bot_quot [DecidableEq α] : Quotient.mk (setoid (α := α)) failure = ⊥
   -- This is a relaxed version of the relevant law: the original law holds if `f` is a bijection.
   -- We phrase it in terms of `orElse` but it's effectively stating that `Functor.map` is monotonic (?)
-  -- f <$> x ⊔ f <$> y ≤ f <$> (x ⊔ y)
+  -- ⟦f <$> x ⊔ f <$> y⟧ ≤ ⟦f <$> (x ⊔ y)⟧
   map_orElse [DecidableEq α] [DecidableEq β] (x y : μ α) (f : α → β)
-    : orElse (orElse (f <$> x) (f <$> y)) (f <$> orElse x y) = (f <$> orElse x y)
+    : Quotient.mk setoid (orElse (f <$> x) (f <$> y)) ≤ Quotient.mk setoid (f <$> orElse x y)
 
 namespace SemilatticeAlt
 instance instSetoid {μ : Type u → Type u} [DecidableEq α] [l : SemilatticeAlt μ] : Setoid (μ α) :=
@@ -308,6 +309,11 @@ instance : LawfulMonad Const where
     simp [Bind.bind]
     cases x <;> simp
 
+private def quot_max_eq_max_quot [DecidableEq α] (a b : Const α) : (Quotient.mk (isSetoid α) a) ⊔ ⟦b⟧ = ⟦a ⊔ b⟧ := by
+    dsimp [Max.max, SemilatticeSup.toMax]
+private def quot_bot_eq_bot_quot [DecidableEq α] : Quotient.mk (isSetoid α) bot = ⊥ := by
+    dsimp [Bot.bot]
+
 instance : SemilatticeAlt Const where
   failure := bot
   orElse := max
@@ -318,29 +324,23 @@ instance : SemilatticeAlt Const where
   failure_seq x := by simp [Seq.seq]
   orElse_failure x := by apply sup_bot_eq
   failure_orElse x := by apply bot_sup_eq
+  setoid {α} := isSetoid α
+  semilattice_quot := inferInstance
+  order_bot_quot := inferInstance
+  quot_bot_eq_bot_quot := quot_bot_eq_bot_quot
+  quot_max_eq_max_quot := quot_max_eq_max_quot
   map_orElse {α β} [DecidableEq α] [DecidableEq β] x y (f : α → β) := by
+    rw [<- quot_max_eq_max_quot]
     simp [Functor.map]
     unfold Function.comp
+    have h : Quotient.mk (isSetoid α) top = ⊤ := rfl
     cases x <;> cases y <;> simp_all <;> try apply bot_le
     · apply le_top
     · apply le_top
     · rename_i x y
       dsimp [max]
-      by_cases h : x = y <;> simp_all
+      by_cases h_eq : x = y <;> simp_all
       constructor <;> apply le_top
-  setoid {α} := isSetoid α
-  semilattice_quot := inferInstance
-  order_bot_quot := inferInstance
-  quot_bot_eq_bot_quot := by
-    dsimp [Bot.bot]
-    intros
-    rfl
-  quot_max_eq_max_quot := by
-    dsimp [SemilatticeSup.toMax]
-    unfold SemilatticeSup.sup
-    simp only [Lattice.toSemilatticeSup, latticeQuot, Lattice.mk']
-    simp only [SemilatticeSup.mk']
-    simp only [instMaxQuot, Quotient.lift_mk, implies_true]
 
 instance : Traversable Const where
   traverse f
@@ -380,31 +380,6 @@ instance isSetoid : Setoid (Option α) where
     symm := Iff.symm
     trans := Iff.trans
   }
-instance : Max (Quotient (@isSetoid α)) where
-  max := by
-    apply Quotient.lift₂ (fun a b => Quotient.mk isSetoid $ a.or b)
-    intro a₁ b₁ a₂ b₂
-    simp [Option.or, isSetoid, HasEquiv.Equiv]
-    intro h_a h_b
-    cases a₁
-    · simp_all
-    · cases a₂ <;> simp_all
-
-/-
-instance : SemilatticeSup (Quotient (@isSetoid α)) := by
-  refine SemilatticeSup.mk' ?_ ?_ ?_ <;> simp [Max.max]
-  · apply Quotient.ind₂
-    simp [Option.or, isSetoid]
-    intro a b
-    cases a <;> cases b <;> simp
-  · intro q₁ q₂ q₃
-    refine Quotient.inductionOn₃ q₁ q₂ q₃ ?_
-    simp [Option.or, isSetoid]
-    intro a b
-    cases a <;> cases b <;> simp
-  · apply Quotient.ind
-    simp
--/
 
 instance : SemilatticeSup (Quotient (@isSetoid α)) where
   le := by
@@ -456,7 +431,7 @@ instance : OrderBot (Quotient (@isSetoid α)) where
   bot := Quotient.mk isSetoid none
   bot_le a := by
     have h : a = ⟦none⟧ ⊔ a := by
-      simp only [Max.max]
+      simp only [Max.max, SemilatticeSup.sup]
       refine Quotient.inductionOn a ?_
       simp
     rw [h]
@@ -484,3 +459,113 @@ instance : SemilatticeAlt Option where
     cases x <;> cases y <;> simp [Option.or, Functor.map]
 
 end Option
+
+namespace List
+
+/-- A `Setoid` instance on `List` that ignores multiplicity. -/
+def memSetoid α : Setoid (List α) := {
+  r a b := a ⊆ b ∧ b ⊆ a
+  iseqv := {
+    refl _ := by constructor <;> exact fun ⦃a⦄ a ↦ a
+    symm := And.symm
+    trans := by
+      rintro _ _ _ ⟨h_xy, h_yx⟩ ⟨h_yz, h_zy⟩
+      constructor
+      · exact Subset.trans h_xy h_yz
+      · exact Subset.trans h_zy h_yx
+  }
+}
+
+instance : Max (Quotient (memSetoid α)) where
+  max := by
+    apply Quotient.lift₂ (fun a b => Quotient.mk (memSetoid α) $ a ++ b)
+    intro a₁ b₁ a₂ b₂
+    simp [memSetoid, HasEquiv.Equiv]
+    intro h_a₁ h_a₂ h_b₁ h_b₂
+    constructor <;> (apply append_subset.mp ; simp_all)
+
+instance : SemilatticeSup (Quotient (@memSetoid α)) where
+  le := by
+    refine Quotient.lift₂ (fun a b => ∀ x ∈ a, x ∈ b) ?_
+    intro a₁ a₂ b₁ b₂
+    simp_all [HasEquiv.Equiv, memSetoid]
+    dsimp [Subset, List.Subset]
+    intro h_ab₁ h_ba₁ h_ab₂ h_ba₂
+    constructor <;> (intro h_mem₁ x h_mem₂ ; try simp_all)
+    · apply h_ab₂
+      apply h_mem₁
+      apply h_ba₁
+      assumption
+    · apply h_ba₂
+      apply h_mem₁
+      apply h_ab₁
+      assumption
+  le_refl := by
+    refine Quotient.ind ?_
+    simp
+  le_trans a b c := by
+    refine Quotient.inductionOn₃ a b c ?_
+    intro a b c
+    simp
+    exact fun a_2 a_3 x a ↦ a_3 x (a_2 x a)
+  le_antisymm := by
+    refine Quotient.ind₂ ?_
+    intro a b
+    simp [memSetoid, Subset, List.Subset]
+    exact fun a_1 a_2 ↦ ⟨a_1, a_2⟩
+  sup := by
+    apply Quotient.lift₂ (fun a b => Quotient.mk (memSetoid α) $ a ++ b)
+    intro a₁ b₁ a₂ b₂
+    simp [memSetoid, HasEquiv.Equiv]
+    intro h_a₁ h_a₂ h_b₁ h_b₂
+    simp_all
+  le_sup_left := by
+    refine Quotient.ind₂ ?_
+    intro a b
+    simp
+    exact fun a ↦ Or.inl
+  le_sup_right := by
+    refine Quotient.ind₂ ?_
+    intro a b
+    simp
+    exact fun a ↦ Or.inr
+  sup_le a b c := by
+    refine Quotient.inductionOn₃ a b c ?_
+    intro a b c
+    simp
+    intro h₁ h₂ x h_or
+    cases h_or <;> simp_all
+  lt_iff_le_not_ge a b := by
+    refine Quotient.inductionOn₂ a b ?_
+    intro a b
+    simp
+
+instance : OrderBot (Quotient (memSetoid α)) where
+  bot := Quotient.mk (memSetoid α) []
+  bot_le a := by
+    have h : a = ⟦[]⟧ ⊔ a := by
+      simp only [Max.max]
+      refine Quotient.inductionOn a ?_
+      simp
+    rw [h]
+    apply SemilatticeSup.le_sup_left
+
+instance : SemilatticeAlt List where
+  setoid {α} := memSetoid α
+  semilattice_quot := inferInstance
+  order_bot_quot := inferInstance
+  failure := []
+  orElse := List.append
+  alt_idem m := by cases m <;> simp [HasEquiv.Equiv, memSetoid]
+  alt_comm m₁ m₂ := by simp [HasEquiv.Equiv, memSetoid]
+  alt_assoc m₁ m₂ m₃ := by cases m₁ <;> cases m₂ <;> simp [HasEquiv.Equiv, memSetoid]
+  map_failure f := rfl
+  failure_seq x := rfl
+  orElse_failure x := by cases x <;> simp
+  failure_orElse y := rfl
+  quot_max_eq_max_quot a b := by dsimp [Max.max, SemilatticeSup.sup]
+  quot_bot_eq_bot_quot := rfl
+  map_orElse x y f := by
+    cases x <;> cases y <;> simp [Functor.map]
+
+end List
