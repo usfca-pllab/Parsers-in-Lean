@@ -137,7 +137,7 @@ def unionSup (m₁ m₂ : Std.HashMap α β) : Std.HashMap α β :=
 
 end unionSup
 
-variable [s : Setoid β] [Semilatticeoid β s]
+variable [s : Setoid β] [semi : Semilatticeoid β s]
 
 /--
 A relaxed equivalence relation that checks whether the value of each key is equivalent rather
@@ -178,7 +178,7 @@ theorem mem_iff {m₁ m₂ : Std.HashMap α β} (h : m₁ ~q m₂) {k : α} : k 
   · intro h_mem
     apply mem_map.mp $ (Equiv.mem_iff h).mpr (mem_map.mpr h_mem)
 
-theorem getElem_eq [EquivBEq α] [LawfulHashable α] {k : α} (hk : k ∈ m₁) (h : m₁ ~q m₂) :
+theorem getElem_eq [EquivBEq α] {k : α} (hk : k ∈ m₁) (h : m₁ ~q m₂) :
     Quotient.mk s m₁[k] = Quotient.mk s (m₂[k]'(h.mem_iff.mp hk)) := by
   dsimp [EquivQuot] at h
   have hk' : k ∈ map (fun x ↦ Quotient.mk s) m₁ := by simp [hk]
@@ -188,7 +188,7 @@ theorem getElem_eq [EquivBEq α] [LawfulHashable α] {k : α} (hk : k ∈ m₁) 
   simp [-Quotient.eq] at h'
   exact h'
 
-theorem getElem?_eq [EquivBEq α] [LawfulHashable α] {m₁ m₂ : Std.HashMap α β} {k : α} (h : m₁ ~q m₂) :
+theorem getElem?_eq [EquivBEq α] {m₁ m₂ : Std.HashMap α β} {k : α} (h : m₁ ~q m₂) :
     Option.map (Quotient.mk s) m₁[k]? = Option.map (Quotient.mk s) m₂[k]? := by
   by_cases h₁ : k ∈ m₁
   · simp [h₁, (mem_iff h).mp h₁, -Quotient.eq]
@@ -198,7 +198,7 @@ theorem getElem?_eq [EquivBEq α] [LawfulHashable α] {m₁ m₂ : Std.HashMap �
       apply h₁ $ (mem_iff h).mpr contra
     simp [h₁, h₂]
 
-theorem getD_eq [EquivBEq α] [LawfulHashable α] {m₁ m₂ : Std.HashMap α β} {k : α} (h : m₁ ~q m₂) :
+theorem getD_eq [EquivBEq α] {m₁ m₂ : Std.HashMap α β} {k : α} (h : m₁ ~q m₂) :
     Quotient.mk s (m₁.getD k fallback) = Quotient.mk s (m₂.getD k fallback) := by
   by_cases h₁ : k ∈ m₁
   · simp [<- getElem_eq_getD, h₁, (mem_iff h).mp h₁, -Quotient.eq]
@@ -307,6 +307,11 @@ lemma unionSup_getD_of_not_contains (m₁ m₂ : Std.HashMap α β) (h : k ∉ m
   repeat rw [getD_eq_getD_getElem?]
   rw [<- Option.getD_map (f := Quotient.mk s)]
   simp [unionSup_getElem_of_not_contains m₁ m₂ h]
+
+lemma unionSup_getD_of_right_not_contains (m₁ m₂ : Std.HashMap α β) (h : k ∉ m₂) {fallback}
+    : Quotient.mk s ((m₁.unionSup m₂).getD k fallback) = Quotient.mk s (m₁.getD k fallback) := by
+  rw [EquivQuot.getD_eq (unionSup_equiv_comm m₁ m₂)]
+  exact unionSup_getD_of_not_contains m₂ m₁ h
 
 lemma unionSup_getD_both {m₁ m₂ : Std.HashMap α β} (h₁ : k ∈ m₁) (h₂ : k ∈ m₂)
     : Quotient.mk s ((m₁.unionSup m₂).getD k ⊥) = ⟦m₁[k] ⊔ m₂[k]⟧ := by
