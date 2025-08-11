@@ -34,8 +34,7 @@ def gen' (cfg : @CFG α ν) (recur : ν → ParserM (tag := tag cfg) α μ (Pars
     | Symbol.nonterm n => recur n
   let parseRule (rule : {rule // rule ∈ cfg.rules n}) : ParserM α μ (ParseTree cfg) := do
     let children := List.map parseSym rule
-    let children <- List.traverse id children
-    pure $ ParseTree.Node n rule children
+    ParseTree.Node n rule <$> List.traverse id children
   ((cfg.rules n).attach.map parseRule).foldl ParserM.instMaxOfTraversableOfDecidableEq.max ⊥
 
 def gen (cfg : @CFG α ν) : ν → ParserM (tag := tag cfg) α μ (ParseTree cfg) := memoize (g := gen' cfg)
@@ -117,5 +116,53 @@ theorem sound_of_sup_sound (cfg : @CFG α ν) (n : ν) (p q : ParserM (tag := ta
     by_cases h_q_contains_0 : 0 ∈ (runParser q input).1
     · exact h_q tree h_mem
     · simp_all
+
+set_option pp.proofs true
+theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg n) input := by
+  unfold gen
+  revert input
+  let p (parser : (n : ν) → ParserM α List (tag cfg n)) := ∀ input, sound cfg n (parser n) input
+  refine memoize_induction (gen' (μ := List) cfg) p ?_ ?_ <;> unfold p <;> simp
+  · -- base case: failure
+    intro input
+    apply failure_sound cfg n input
+  · -- inductive case
+    intro recur h_recur input
+    unfold gen'
+    simp
+    apply List.foldlRecOn (motive := (sound cfg n · input)) _ _ ?_ ?_
+    · -- base case of fold
+      apply failure_sound
+    · -- inductive case
+      simp_all
+      intro b b_sound a rule h_rule h_a
+      let buildNode := Node n ⟨rule, (Iff.of_eq (Eq.refl (rule ∈ cfg.rules n))).mpr h_rule⟩
+      let children : ParserM α List (List (ParseTree cfg)) := List.traverse id
+                (List.map
+                  (fun sym ↦
+                    match sym with
+                    | Symbol.term a => Leaf <$> terminal' a
+                    | Symbol.nonterm n => recur n)
+                  rule)
+      apply sound_of_sup_sound
+      · assumption
+      · subst h_a
+        -- Experimenting with bind
+        unfold sound
+        intro tree h_tree
+        conv at h_tree =>
+          enter [1,1,1,1]
+          conv => arg 1 ; change buildNode
+          conv => arg 2 ; change children
+        rw [Std.HashMap.Equiv.getD_eq (runParser_map _ _ _)] at h_tree
+        rw [Std.HashMap.getD_eq_getD_getElem?] at h_tree
+        let result := (Std.HashMap.map (fun x ↦ Functor.map buildNode) (runParser children input).1)
+        by_cases h : 0 ∈ result <;> subst result <;> simp [h] at h_tree
+        · subst buildNode
+          replace ⟨a, h_a, h_tree⟩ := h_tree
+          subst h_tree
+          simp [ParseTree.Valid]
+
+        · simp [Bot.bot, SemilatticeAlt.failure] at h_tree
 
 end Gen

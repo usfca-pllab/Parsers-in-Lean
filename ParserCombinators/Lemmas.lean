@@ -8,7 +8,6 @@ variable {τ} { α β : Type u } {tag : τ → Type u} { μ : Type u → Type u 
 axiom memoize_induction
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t))
   (p : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → Prop)
-  (input : Array β)
   (h_failure : p (fun _ => ⊥))
   (h_induction : ∀ parser, p (parser) → p (g parser))
     : p (memoize Counter.empty g)
@@ -18,6 +17,12 @@ variable (parser₁ parser₂ : ParserM (tag := tag) β μ α) (input : Array β
 
 axiom runParser_sup_eq_sup_runParser
   : (runParser (parser₁ ⊔ parser₂) input).1.EquivQuot ((runParser parser₁ input).1 ⊔ (runParser parser₂ input).1)
+
+
+axiom runParser_map
+  [DecidableEq α']
+  (f : α → α')
+  : (runParser (f <$> parser₁) input).1.Equiv ((runParser parser₁ input).1.map fun _ => Functor.map f)
 
 axiom mem_runParser_bind_iff_eq_bind_mem_runParser
   [DecidableEq α']
