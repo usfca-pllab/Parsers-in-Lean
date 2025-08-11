@@ -159,10 +159,27 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
         let result := (Std.HashMap.map (fun x ↦ Functor.map buildNode) (runParser children input).1)
         by_cases h : 0 ∈ result <;> subst result <;> simp [h] at h_tree
         · subst buildNode
-          replace ⟨a, h_a, h_tree⟩ := h_tree
+          replace ⟨subtrees, h_subtrees, h_tree⟩ := h_tree
           subst h_tree
           simp [ParseTree.Valid]
-
+          constructor
+          · simp [children] at *
+            induction rule
+            · conv at h_subtrees =>
+                simp [List.traverse]
+                rw [Std.HashMap.getElem_eq_get_getElem?]
+                simp [runParser_pure]
+              simp [h_subtrees]
+            · rename_i head tail ih
+              conv at h_subtrees =>
+                simp [List.traverse]
+              -- TODO: unpack children, use induction to get the expected tree via `recur`
+              -- need to handle the `<*>` we got from expanding List.traverse.
+              --
+              -- We can probably use a lot of the machinery for the next part of the proof too.
+              sorry
+          · intro sym subtree h_mem
+            sorry -- TODO: unpack children, use induction to get the expected tree via `recur`
         · simp [Bot.bot, SemilatticeAlt.failure] at h_tree
 
 end Gen
