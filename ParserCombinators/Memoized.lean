@@ -110,10 +110,21 @@ end ParserM
 -- TODO: prove that the relevant laws hold for the monad instance
 instance [Monad μ] [Traversable μ] : LawfulMonad (ParserM (tag := tag) β μ) := by
   refine LawfulMonad.mk' _ ?_ ?_ ?_
-  · sorry
+  · intro a x
+    -- Simplified to Right Identity law instead of
+    -- Functor Identity Law, and proved inductively
+    simp [Functor.map]
+    induction x with
+    -- Trivial success case (base)
+    | Return a => rfl
+    -- Inductive case
+    | Bind p k ih =>
+      simp [ParserM.bind]
+      ext x; exact ih x
   · intros
     simp [Bind.bind, ParserM.bind]
-  · sorry
+  · simp [Bind.bind]
+    sorry
 
 -- TODO: prove that ParserM is a `SemilatticeSup` + `OrderBot`
 -- TODO: prove that the relevant laws hold for lower/lift
