@@ -135,7 +135,14 @@ instance [Monad μ] [Traversable μ] : LawfulMonad (ParserM (tag := tag) β μ) 
       -- Goal simplifies to: (f a' >>= g) = (f a' >>= g)
       rfl
     -- Inductive Case: x = Bind p k
-    | Bind p k ih => sorry
+    | Bind p k ih =>
+      simp [Bind.bind]
+      simp [ParserM.bind]
+      apply funext
+      intro x
+      have h := ih x f g
+      simp [Bind.bind] at h
+      exact h
 
 
 
