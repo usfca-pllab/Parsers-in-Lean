@@ -19,7 +19,10 @@ import Aesop
 
 -- β is the alphabet: parsers work over Array β
 universe u v
-variable {τ} { α β : Type u } {tag : τ → Type u} { μ : Type u → Type u } [BEq τ] [LawfulBEq τ] [Hashable τ] [DecidableEq τ] [semilat_μ : SemilatticeAlt μ] [h_eq : ∀ t : τ, DecidableEq (tag t)]
+-- Madi: Added MonadState and MonadReader constraints to the underlying monad μ in order to
+-- make the constraints global for when I write lower/lift theorems
+variable {τ} { α β : Type u } {tag : τ → Type u} { μ : Type u → Type u } [BEq τ] [LawfulBEq τ] [Hashable τ] [DecidableEq τ] [semilat_μ : SemilatticeAlt μ] [h_eq : ∀ t : τ, DecidableEq (tag t)] {S R : Type u}
+  [Monad μ] [LawfulMonad μ] [MonadState S μ] [MonadReader R μ]
 
 def startState {μ} [Monad μ] : MemoData tag μ :=
   Std.DHashMap.emptyWithCapacity
@@ -109,10 +112,58 @@ instance [Monad μ] [Traversable μ] [DecidableEq α] : Max (ParserM (tag := tag
 end ParserM
 
 -- TODO: prove that the relevant laws hold for the monad instance
+instance [Monad μ] [Traversable μ] : LawfulMonad (ParserM (tag := tag) β μ) := by
+  refine LawfulMonad.mk' _ ?_ ?_ ?_
+  · intro a x
+    -- Simplified to Right Identity law instead of
+    -- Functor Identity Law, and proved inductively
+    simp [Functor.map]
+    induction x with
+    -- Trivial success case (base)
+    | Return a => rfl
+    -- Inductive case
+    | Bind p k ih =>
+      simp [ParserM.bind]
+      ext x; exact ih x
+  · intros a f
+    simp [Bind.bind, ParserM.bind]
+  · intros _ _ _ x f g
+    -- Start by expanding the definition of >>= (which is ParserM.bind)
+    -- Now prove by induction on x
+    induction x generalizing f g with
+    -- Base Case 1: x = Return a'
+    | Return a' =>
+      -- Goal simplifies to: (f a' >>= g) = (f a' >>= g)
+      rfl
+    -- Inductive Case: x = Bind p k
+    | Bind p k ih =>
+      simp [Bind.bind]
+      simp [ParserM.bind]
+      apply funext
+      intro x
+      have h := ih x f g
+      simp [Bind.bind] at h
+      exact h
+
+
+
+-- TODO: (madi- from constrained monad paper)
+-- theorem lower_preserves_identity
+  -- Homomorphism property 1: lower (pure x) = pure x
+
+
+-- theorem lower_preserves_composition
+  -- Homomorphism property 2: lower (p >>= f) = lower p >>= (lower ∘ f)
+
+
+-- theorem isomorphism_lower_lift
+  -- Isomorphism property: lower (lift p) = p
+
 -- TODO: prove that ParserM is a `SemilatticeSup` + `OrderBot`
--- TODO: prove that the relevant laws hold for lower/lift
+
 
 open ParserM (lift lower)
+
 
 def epsilon [Monad μ] : ParserM (tag := tag) β μ PUnit := lift $ fun pos => pure {(pos, pure $ PUnit.unit)}
 
