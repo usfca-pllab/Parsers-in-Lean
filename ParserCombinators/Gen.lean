@@ -47,14 +47,17 @@ def gen (cfg : @CFG α ν) : ν → ParserM (tag := tag cfg) α μ (ParseTree cf
 
 abbrev sound (cfg : @CFG α ν)
   (n : ν) (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  := ∀ tree ∈ (runParser p input).1.getD 0 ⊥, tree.Valid ∧ tree.root = Symbol.nonterm n
+  :=
+  ∀ start end_ : ℕ,
+  ∀ _h_bound : start ≤ end_ ∧ end_ ≤ input.size,
+  ∀ tree ∈ (runParser p input start).1.getD end_ ⊥, tree.Valid ∧ tree.root = Symbol.nonterm n
 
 abbrev complete (cfg : @CFG α ν) (n : ν) (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  (h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
+  (_h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
   := ∃ tree, tree ∈ (runParser p input).1[0]?.getD ⊥
 
 omit [Fintype ν] in
-lemma failure_empty (cfg : @CFG α ν): (runParser (tag := tag cfg) (⊥ : ParserM α μ (ParseTree cfg)) input).1.isEmpty := by
+lemma failure_empty (cfg : @CFG α ν) {start : ℕ} : (runParser (tag := tag cfg) (⊥ : ParserM α μ (ParseTree cfg)) input start).1.isEmpty := by
   simp [Bot.bot, runParser, ReaderT.run, MStateT.run, ParserM.lift, ParserM.lower]
   unfold Parser.failure Parser.bind Bind.bind
 
@@ -76,7 +79,7 @@ omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 theorem failure_sound (cfg : @CFG α ν) (n : ν) (input : Array α) : sound cfg n ⊥ input
   := by
   unfold sound
-  intro tree
+  intro start end_ _h tree
   simp [Std.HashMap.getD_of_isEmpty, failure_empty]
   simp [Bot.bot, SemilatticeAlt.failure]
 
@@ -86,31 +89,33 @@ theorem sound_of_sup_sound (cfg : @CFG α ν) (n : ν) (p q : ParserM (tag := ta
   (h_p : sound cfg n p input) (h_q : sound cfg n q input) : sound cfg n (p ⊔ q) input
   := by
   unfold sound at *
-  intro tree h_mem
+  intro start end_ h_bound tree h_mem
+  have h_p := h_p start end_ h_bound
+  have h_q := h_q start end_ h_bound
   -- Extract subset relationships to use with h_mem
-  have h := runParser_sup_eq_sup_runParser p q input
-  have h' := Std.HashMap.EquivQuot.getD_eq (s := SemilatticeAlt.setoid) (k := 0) (fallback := ⊥) h
+  have h := runParser_sup_eq_sup_runParser p q input start
+  have h' := Std.HashMap.EquivQuot.getD_eq (s := SemilatticeAlt.setoid) (k := end_) (fallback := ⊥) h
   simp [SemilatticeAlt.setoid, List.memSetoid] at h'
   dsimp [Subset, List.Subset] at *
   replace h_mem := @h'.1 tree h_mem
   dsimp [Max.max] at h_mem
-  by_cases h_p_contains_0 : 0 ∈ (runParser p input).1
-  · by_cases h_q_contains_0 : 0 ∈ (runParser q input).1
+  by_cases h_p_contains_end_ : end_ ∈ (runParser p input start).1
+  · by_cases h_q_contains_end_ : end_ ∈ (runParser q input start).1
     · rw [<- Std.HashMap.getElem_eq_getD] at h_p <;> simp_all
       rw [<- Std.HashMap.getElem_eq_getD] at h_q <;> try simp_all
       -- The explicit application is for providing the Semilatticeoid instance.
-      have h' := Std.HashMap.unionSup_getD_both (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) h_p_contains_0 h_q_contains_0
+      have h' := Std.HashMap.unionSup_getD_both (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) h_p_contains_end_ h_q_contains_end_
       simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h'
       replace h_mem := @h'.1 tree h_mem
       simp [Max.max, SemilatticeAlt.orElse] at h_mem
       cases h_mem <;> rename_i h_mem
       · exact h_p tree h_mem
       · exact h_q tree h_mem
-    · have h' := Std.HashMap.unionSup_getD_of_right_not_contains (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) (fallback := ⊥) (runParser p input).1 (runParser q input).1 h_q_contains_0
+    · have h' := Std.HashMap.unionSup_getD_of_right_not_contains (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) (fallback := ⊥) (runParser p input start).1 (runParser q input start).1 h_q_contains_end_
       simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h'
       replace h_mem := @h'.1 tree h_mem
       exact h_p tree h_mem
-  · have h' := Std.HashMap.unionSup_getD_of_not_contains (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) (fallback := ⊥) (runParser p input).1 (runParser q input).1 h_p_contains_0
+  · have h' := Std.HashMap.unionSup_getD_of_not_contains (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) (fallback := ⊥) (runParser p input start).1 (runParser q input start).1 h_p_contains_end_
     simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h'
     replace h_mem := @h'.1 tree h_mem
     by_cases h_q_contains_0 : 0 ∈ (runParser q input).1
@@ -149,15 +154,15 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
       · subst h_a
         -- Experimenting with bind
         unfold sound
-        intro tree h_tree
+        intro start end_ h_bound tree h_tree
         conv at h_tree =>
           enter [1,1,1,1]
           conv => arg 1 ; change buildNode
           conv => arg 2 ; change children
         rw [Std.HashMap.Equiv.getD_eq (runParser_map _ _ _)] at h_tree
         rw [Std.HashMap.getD_eq_getD_getElem?] at h_tree
-        let result := (Std.HashMap.map (fun x ↦ Functor.map buildNode) (runParser children input).1)
-        by_cases h : 0 ∈ result <;> subst result <;> simp [h] at h_tree
+        let result := (Std.HashMap.map (fun x ↦ Functor.map buildNode) (runParser children input start).1)
+        by_cases h : end_ ∈ result <;> subst result <;> simp [h] at h_tree
         · subst buildNode
           replace ⟨subtrees, h_subtrees, h_tree⟩ := h_tree
           subst h_tree
@@ -165,19 +170,30 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
           constructor
           · simp [children] at *
             induction rule
-            · conv at h_subtrees =>
+            ·
+              have h_pure := runParser_pure (α := List (Symbol α ν)) (tag := tag cfg) (μ := List) input [] start end_ h_bound.right
+              conv at h_subtrees =>
                 simp [List.traverse]
                 rw [Std.HashMap.getElem_eq_get_getElem?]
-                simp [runParser_pure]
+                -- TODO: fix this rewrite issue
+                simp [h_pure]
               simp [h_subtrees]
+              sorry
             · rename_i head tail ih
               conv at h_subtrees =>
                 simp [List.traverse]
-              -- TODO: unpack children, use induction to get the expected tree via `recur`
+                simp [seq_eq_bind]
+                -- TODO: use the bind lemma here, then recursively prove soundness for both parts
+                -- for head: use recur or terminal'
+                -- for tail: use ih, might need to generalize start/end?
+
+              -- unpack children, use induction to get the expected tree via `recur`
               -- need to handle the `<*>` we got from expanding List.traverse.
               --
               -- We can probably use a lot of the machinery for the next part of the proof too.
+              simp only at *
               sorry
+              -- HERE --
           · intro sym subtree h_mem
             sorry -- TODO: unpack children, use induction to get the expected tree via `recur`
         · simp [Bot.bot, SemilatticeAlt.failure] at h_tree

@@ -16,18 +16,19 @@ axiom memoize_induction
 variable (parser₁ parser₂ : ParserM (tag := tag) β μ α) (input : Array β) [DecidableEq α]
 
 axiom runParser_sup_eq_sup_runParser
-  : (runParser (parser₁ ⊔ parser₂) input).1.EquivQuot ((runParser parser₁ input).1 ⊔ (runParser parser₂ input).1)
+  : ∀ start : ℕ, (runParser (parser₁ ⊔ parser₂) input start).1.EquivQuot ((runParser parser₁ input start).1 ⊔ (runParser parser₂ input start).1)
 
 axiom runParser_map
   [DecidableEq α']
   (f : α → α')
-  : (runParser (f <$> parser₁) input).1.Equiv ((runParser parser₁ input).1.map fun _ => Functor.map f)
+  {start : ℕ}
+  : (runParser (f <$> parser₁) input start).1.Equiv ((runParser parser₁ input start).1.map fun _ => Functor.map f)
 
 axiom runParser_pure
   (a : α)
-  (n : ℕ)
+  (start n : ℕ)
   (h : n ≤ input.size)
-  : (runParser (tag := tag) (pure a) input).1[n]? = some (pure (f := μ) a)
+  : (runParser (tag := tag) (pure a) input start).1[n]?= some (pure (f := μ) a)
 
 axiom mem_runParser_bind_iff_eq_bind_mem_runParser
   [DecidableEq α']
