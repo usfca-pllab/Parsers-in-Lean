@@ -172,11 +172,21 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
             induction rule
             ·
               have h_pure := runParser_pure (α := List (Symbol α ν)) (tag := tag cfg) (μ := List) input [] start end_ h_bound.right
+              simp [children] at h
+              simp [children] at *
+              simp [List.traverse] at *
+              -- TODO: use h, create a lemma to prove end_ = start
+              -- then, fix runParser_pure to use the same index for start and end_
+              -- then, force a rewrite in h_subtrees using h_pure
               conv at h_subtrees =>
                 simp [List.traverse]
                 rw [Std.HashMap.getElem_eq_get_getElem?]
                 -- TODO: fix this rewrite issue
-                simp [h_pure]
+                enter [1, 1]
+                simp [*]
+                unfold runParser ParserM.lower MStateT.run
+                simp [*]
+
               simp [h_subtrees]
               sorry
             · rename_i head tail ih
