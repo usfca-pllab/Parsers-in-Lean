@@ -9,7 +9,7 @@ axiom memoize_induction
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t))
   (p : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → Prop)
   (h_failure : p (fun _ => ⊥))
-  (h_induction : ∀ parser, p (parser) → p (g parser))
+  (h_induction : ∀ parser, p parser → p (g parser))
     : p (memoize Counter.empty g)
 
 
@@ -30,11 +30,25 @@ axiom runParser_pure
   (h : n ≤ input.size)
   : (runParser (tag := tag) (pure a) input start).1[n]?= some (pure (f := μ) a)
 
+/-
+-- The axiom below is incorrect
 axiom mem_runParser_bind_iff_eq_bind_mem_runParser
   [DecidableEq α']
   (parser₂ : α → ParserM (tag := tag) β μ α')
   {start end_pos : ℕ}
   {r : μ α'}
-    : ((runParser (parser₁ >>= parser₂) input start).1[end_pos]? = some r) ↔
+    : ((runParser (parser₁ >>= parser₂) input start).1[end_pos]? = some r) ↔  -- would be "←"
   ∃ split : ℕ, ∃ s : μ α, (runParser parser₁ input start).1[split]? = some s ∧
-    (s >>= (fun x => sequence (runParser (parser₂ x) input split).1[end_pos]?)) = r
+    (s >>= (fun x => sequence (runParser (parser₂ x) input split).1[end_pos]?)) = r  -- would be "≤ r" instead of = r
+-/
+
+axiom mem_runParser_bind_iff_eq_bind_mem_runParser
+  [DecidableEq α']
+  (parser₁ : ParserM (tag := tag) β List α)
+  (parser₂ : α → ParserM (tag := tag) β List α')
+  {start end_pos : ℕ}
+  {r : List α'}
+  {x : α'}
+    : ((runParser (parser₁ >>= parser₂) input start).1[end_pos]? = some r ∧ x ∈ r) ↔
+  ∃ split : ℕ, ∃ s : List α, (runParser parser₁ input start).1[split]? = some s ∧
+  x ∈ s >>= (fun x => (runParser (parser₂ x) input split).1[end_pos]?.toList.flatten)

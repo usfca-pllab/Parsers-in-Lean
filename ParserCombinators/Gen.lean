@@ -125,14 +125,14 @@ theorem sound_of_sup_sound (cfg : @CFG α ν) (n : ν) (p q : ParserM (tag := ta
 set_option pp.proofs true
 theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg n) input := by
   unfold gen
-  revert input
-  let p (parser : (n : ν) → ParserM α List (tag cfg n)) := ∀ input, sound cfg n (parser n) input
+  revert input n
+  let p (parser : (n : ν) → ParserM α List (tag cfg n)) := ∀ n input, sound cfg n (parser n) input
   refine memoize_induction (gen' (μ := List) cfg) p ?_ ?_ <;> unfold p <;> simp
   · -- base case: failure
-    intro input
+    intro n input
     apply failure_sound cfg n input
   · -- inductive case
-    intro recur h_recur input
+    intro recur h_recur n input
     unfold gen'
     simp
     apply List.foldlRecOn (motive := (sound cfg n · input)) _ _ ?_ ?_
@@ -168,31 +168,36 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
           subst h_tree
           simp [ParseTree.Valid]
           constructor
-          · simp [children] at *
-            induction rule
+          ·
+            simp [children] at *
+            -- separate this length constraint into a lemma, something like (runParser (traverse id xs)).1[_].length = xs.length
+            -- also try to set it up so we have that each parser's result occurs in the list?
+            induction rule generalizing subtrees
             ·
-              have h_pure := runParser_pure (α := List (Symbol α ν)) (tag := tag cfg) (μ := List) input [] start end_ h_bound.right
+              have h_pure := runParser_pure (α := List (ParseTree cfg)) (tag := tag cfg) (μ := List) input [] start end_ h_bound.right
               simp [children] at h
-              simp [children] at *
               simp [List.traverse] at *
-              -- TODO: use h, create a lemma to prove end_ = start
-              -- then, fix runParser_pure to use the same index for start and end_
-              -- then, force a rewrite in h_subtrees using h_pure
               conv at h_subtrees =>
-                simp [List.traverse]
                 rw [Std.HashMap.getElem_eq_get_getElem?]
-                -- TODO: fix this rewrite issue
-                enter [1, 1]
-                simp [*]
-                unfold runParser ParserM.lower MStateT.run
-                simp [*]
-
+                simp [h_pure]
               simp [h_subtrees]
-              sorry
             · rename_i head tail ih
-              conv at h_subtrees =>
-                simp [List.traverse]
-                simp [seq_eq_bind]
+              simp at ih
+              simp [children, List.traverse] at h
+              simp [List.traverse] at h_subtrees
+              cases head with
+              | term a =>
+                simp_all
+                sorry
+              | nonterm head =>
+                simp_all [seq_eq_bind]
+                conv at h_subtrees =>
+                  simp [seq_eq_bind]
+                  enter [1, 1, 1, 1]
+                have h' := And.intro (Std.HashMap.getElem?_eq_some_getElem h) h_subtrees
+                have h'' := by
+                  apply (mem_runParser_bind_iff_eq_bind_mem_runParser input _ _).mp h'
+                have ⟨split, s, h_head_s, h_tail⟩ := h''
                 -- TODO: use the bind lemma here, then recursively prove soundness for both parts
                 -- for head: use recur or terminal'
                 -- for tail: use ih, might need to generalize start/end?
@@ -201,11 +206,12 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
               -- need to handle the `<*>` we got from expanding List.traverse.
               --
               -- We can probably use a lot of the machinery for the next part of the proof too.
-              simp only at *
-              sorry
               -- HERE --
           · intro sym subtree h_mem
             sorry -- TODO: unpack children, use induction to get the expected tree via `recur`
+            -- have h_head := h_recur head input start split (by sorry) -- the s from ∃s of the bind lemma goes here
+            -- simp [*] at h_head
+
         · simp [Bot.bot, SemilatticeAlt.failure] at h_tree
 
 end Gen
