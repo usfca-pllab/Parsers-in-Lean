@@ -207,6 +207,7 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
               --
               -- We can probably use a lot of the machinery for the next part of the proof too.
               -- HERE --
+
           · intro sym subtree h_mem
             sorry -- TODO: unpack children, use induction to get the expected tree via `recur`
             -- have h_head := h_recur head input start split (by sorry) -- the s from ∃s of the bind lemma goes here

@@ -27,8 +27,7 @@ axiom runParser_map
 axiom runParser_pure
   (a : α)
   (start n : ℕ)
-  (h : n ≤ input.size)
-  : (runParser (tag := tag) (pure a) input start).1[n]?= some (pure (f := μ) a)
+  : (runParser (tag := tag) (pure a) input start).1[n]? = if n = start then some (pure (f := μ) a) else none
 
 /-
 -- The axiom below is incorrect
@@ -52,3 +51,18 @@ axiom mem_runParser_bind_iff_eq_bind_mem_runParser
     : ((runParser (parser₁ >>= parser₂) input start).1[end_pos]? = some r ∧ x ∈ r) ↔
   ∃ split : ℕ, ∃ s : List α, (runParser parser₁ input start).1[split]? = some s ∧
   x ∈ s >>= (fun x => (runParser (parser₂ x) input split).1[end_pos]?.toList.flatten)
+
+theorem runParser_traverse_preserves_length (xs: List (ParserM (tag := tag) β List α))
+  (start end_pos : ℕ)
+  (result : List α)
+  (h: result ∈ (runParser (List.traverse id xs) input start).1.getD end_pos [])
+  : result.length = xs.length
+  := by
+  revert h
+  rw [Std.HashMap.getD_eq_getD_getElem?]
+  induction xs generalizing start end_pos with
+    | nil =>
+      rw [List.traverse, runParser_pure]
+      by_cases h : end_pos = start <;> simp [h]
+    | cons h t ih =>
+      sorry
