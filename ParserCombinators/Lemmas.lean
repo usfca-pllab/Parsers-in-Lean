@@ -64,5 +64,23 @@ theorem runParser_traverse_preserves_length (xs: List (ParserM (tag := tag) β L
     | nil =>
       rw [List.traverse, runParser_pure]
       by_cases h : end_pos = start <;> simp [h]
-    | cons h t ih =>
-      sorry
+    | cons head tail ih =>
+      rw [List.traverse, seq_eq_bind]
+      simp_all
+      intro h
+      have h_endPos_mem_resultMap : end_pos ∈ (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1 := by
+        unfold Option.getD at h
+        cases h_opt : (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+          input start).1[end_pos]?
+        · simp [h_opt] at h
+        · have ⟨h_mem, h_opt⟩ := Std.HashMap.getElem?_eq_some_iff.mp h_opt
+          exact h_mem
+      rw [Std.HashMap.getElem?_eq_some_getElem h_endPos_mem_resultMap] at h
+      simp at h
+
+      have h := (mem_runParser_bind_iff_eq_bind_mem_runParser input head (fun (a : α) => List.cons a <$> List.traverse id tail) (x := result))
