@@ -170,44 +170,15 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
           constructor
           ·
             simp [children] at *
-            -- separate this length constraint into a lemma, something like (runParser (traverse id xs)).1[_].length = xs.length
-            -- also try to set it up so we have that each parser's result occurs in the list?
-            induction rule generalizing subtrees
-            ·
-              have h_pure := runParser_pure (α := List (ParseTree cfg)) (tag := tag cfg) (μ := List) input [] start end_ h_bound.right
-              simp [children] at h
-              simp [List.traverse] at *
-              conv at h_subtrees =>
-                rw [Std.HashMap.getElem_eq_get_getElem?]
-                simp [h_pure]
-              simp [h_subtrees]
-            · rename_i head tail ih
-              simp at ih
-              simp [children, List.traverse] at h
-              simp [List.traverse] at h_subtrees
-              cases head with
-              | term a =>
-                simp_all
-                sorry
-              | nonterm head =>
-                simp_all [seq_eq_bind]
-                conv at h_subtrees =>
-                  simp [seq_eq_bind]
-                  enter [1, 1, 1, 1]
-                have h' := And.intro (Std.HashMap.getElem?_eq_some_getElem h) h_subtrees
-                have h'' := by
-                  apply (mem_runParser_bind_iff_eq_bind_mem_runParser input _ _).mp h'
-                have ⟨split, s, h_head_s, h_tail⟩ := h''
-                -- TODO: use the bind lemma here, then recursively prove soundness for both parts
-                -- for head: use recur or terminal'
-                -- for tail: use ih, might need to generalize start/end?
-
-              -- unpack children, use induction to get the expected tree via `recur`
-              -- need to handle the `<*>` we got from expanding List.traverse.
-              --
-              -- We can probably use a lot of the machinery for the next part of the proof too.
-              -- HERE --
-
+            let mkParser : Symbol α ν -> (ParserM α List _) := (fun sym ↦
+              match sym with
+              | Symbol.term a => Leaf <$> terminal' a
+              | Symbol.nonterm n => recur n)
+            let parsers := rule.map mkParser
+            rw [<- List.length_map mkParser]
+            apply runParser_traverse_preserves_length input _ start end_
+            rw [Std.HashMap.getElem_eq_getD (fallback := [])] at h_subtrees
+            exact h_subtrees
           · intro sym subtree h_mem
             sorry -- TODO: unpack children, use induction to get the expected tree via `recur`
             -- have h_head := h_recur head input start split (by sorry) -- the s from ∃s of the bind lemma goes here
