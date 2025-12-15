@@ -24,6 +24,16 @@ axiom runParser_map
   {start : ℕ}
   : (runParser (f <$> parser₁) input start).1.Equiv ((runParser parser₁ input start).1.map fun _ => Functor.map f)
 
+omit [Fintype τ] in
+lemma runParser_map_getElem?_eq
+  [DecidableEq α']
+  (f : α → α')
+  {start : ℕ}
+  (endPos : ℕ)
+  : (runParser (f <$> parser₁) input start).1[endPos]? = ((runParser parser₁ input start).1.map fun _ => Functor.map f)[endPos]? := by
+  apply Std.HashMap.Equiv.getElem?_eq
+  apply runParser_map
+
 axiom runParser_pure
   (a : α)
   (start n : ℕ)
@@ -52,6 +62,7 @@ axiom mem_runParser_bind_iff_eq_bind_mem_runParser
   ∃ split : ℕ, ∃ s : List α, (runParser parser₁ input start).1[split]? = some s ∧
   x ∈ s >>= (fun x => (runParser (parser₂ x) input split).1[end_pos]?.toList.flatten)
 
+omit [Fintype τ] in
 theorem runParser_traverse_preserves_length (xs: List (ParserM (tag := tag) β List α))
   (start end_pos : ℕ)
   (result : List α)
@@ -60,7 +71,7 @@ theorem runParser_traverse_preserves_length (xs: List (ParserM (tag := tag) β L
   := by
   revert h
   rw [Std.HashMap.getD_eq_getD_getElem?]
-  induction xs generalizing start end_pos with
+  induction xs generalizing start end_pos result with
     | nil =>
       rw [List.traverse, runParser_pure]
       by_cases h : end_pos = start <;> simp [h]
@@ -83,4 +94,23 @@ theorem runParser_traverse_preserves_length (xs: List (ParserM (tag := tag) β L
       rw [Std.HashMap.getElem?_eq_some_getElem h_endPos_mem_resultMap] at h
       simp at h
 
-      have h := (mem_runParser_bind_iff_eq_bind_mem_runParser input head (fun (a : α) => List.cons a <$> List.traverse id tail) (x := result))
+      let r := (runParser
+        (head >>= fun a => List.cons a <$> List.traverse id tail)
+        input start).1[end_pos]
+
+      have h_split := by
+        apply (mem_runParser_bind_iff_eq_bind_mem_runParser input head (fun (a : α) => List.cons a <$> List.traverse id tail) (x := result) (r := r) (start := start) (end_pos := end_pos)).mp (And.intro _ _)
+        · apply Std.HashMap.getElem?_eq_some_getElem
+        · exact h
+      replace ⟨split, s, h_split, h_result⟩ := h_split
+      simp [runParser_map_getElem?_eq] at h_result
+      cases result with
+      | nil =>
+        simp at h_result
+      | cons _ t_result =>
+        simp
+        apply ih split end_pos t_result
+        simp at h_result
+        replace ⟨_, _, results, h_result, h_t_result, _⟩ := h_result
+        simp [h_result]
+        exact h_t_result
