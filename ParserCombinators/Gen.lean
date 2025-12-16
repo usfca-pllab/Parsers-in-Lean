@@ -180,6 +180,15 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
             rw [Std.HashMap.getElem_eq_getD (fallback := [])] at h_subtrees
             exact h_subtrees
           · intro sym subtree h_mem
+            -- TODO: alternative: use some form of induction on rule + children (somehow ignoring cfg.rules)
+            -- induce on `rule.zip subtrees`?
+            cases sym <;> cases subtree <;> simp_all
+            · rename_i a b
+              sorry
+            · sorry -- here, we need the fact that each subtree is obtained by the relevant rule so this case is impossible
+            · sorry -- ditto
+            · rename_i a n rule' children'
+              -- we also need to use h_mem to conclude the first fact.  The second should come from h_recur?
             sorry -- TODO: unpack children, use induction to get the expected tree via `recur`
             -- have h_head := h_recur head input start split (by sorry) -- the s from ∃s of the bind lemma goes here
             -- simp [*] at h_head
