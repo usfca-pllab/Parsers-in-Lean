@@ -5,6 +5,7 @@ import ParserCombinators.Memoized
 universe u v
 variable {τ} { α β : Type u } {tag : τ → Type u} { μ : Type u → Type u } [Fintype τ] [BEq τ] [LawfulBEq τ] [Hashable τ] [DecidableEq τ] [Monad μ] [Traversable μ] [semilat_μ : SemilatticeAlt μ] [h_eq : ∀ t : τ, DecidableEq (tag t)]
 
+-- NOTE: might need a different lemma along the lines of "k < input.len p ∧ (recur k g input) => p (recur memoize g input)"
 axiom memoize_induction
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t))
   (p : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → Prop)

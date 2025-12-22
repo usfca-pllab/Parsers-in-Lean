@@ -142,13 +142,11 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
       simp_all
       intro b b_sound a rule h_rule h_a
       let buildNode := Node n ⟨rule, (Iff.of_eq (Eq.refl (rule ∈ cfg.rules n))).mpr h_rule⟩
-      let children : ParserM α List (List (ParseTree cfg)) := List.traverse id
-                (List.map
-                  (fun sym ↦
-                    match sym with
-                    | Symbol.term a => Leaf <$> terminal' a
-                    | Symbol.nonterm n => recur n)
-                  rule)
+      let mkParser : Symbol α ν -> (ParserM α List _) := (fun sym ↦
+        match sym with
+        | Symbol.term a => Leaf <$> terminal' a
+        | Symbol.nonterm n => recur n)
+      let children : ParserM α List (List (ParseTree cfg)) := List.traverse id (List.map mkParser rule)
       apply sound_of_sup_sound
       · assumption
       · subst h_a
@@ -167,21 +165,23 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
           replace ⟨subtrees, h_subtrees, h_tree⟩ := h_tree
           subst h_tree
           simp [ParseTree.Valid]
-          constructor
-          ·
+          have h_len : rule.length = subtrees.length := by
             simp [children] at *
-            let mkParser : Symbol α ν -> (ParserM α List _) := (fun sym ↦
-              match sym with
-              | Symbol.term a => Leaf <$> terminal' a
-              | Symbol.nonterm n => recur n)
             let parsers := rule.map mkParser
             rw [<- List.length_map mkParser]
+            symm
             apply runParser_traverse_preserves_length input _ start end_
             rw [Std.HashMap.getElem_eq_getD (fallback := [])] at h_subtrees
             exact h_subtrees
+          constructor
+          · exact h_len
           · intro sym subtree h_mem
             -- TODO: alternative: use some form of induction on rule + children (somehow ignoring cfg.rules)
             -- induce on `rule.zip subtrees`?
+            have h_mem_subtrees (i : Fin subtrees.length) : ∃ s e : ℕ, ∃ h : e ∈ (runParser (mkParser rule[i]) input s).1, subtrees[i] ∈ (runParser (mkParser rule[i]) input s).1[e]'h := by
+              -- induction on i: when i goes up, we can push through the traverse.
+              -- the tricky bit is generalizing rule + subtrees (without capturing too many hypotheses) so that we can instantiate smaller lists
+              sorry
             cases sym <;> cases subtree <;> simp_all
             · rename_i a b
               sorry
