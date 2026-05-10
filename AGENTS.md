@@ -37,6 +37,24 @@ When changing proofs:
 - Preserve existing theorem statements unless the surrounding definitions force
   a sharper statement.
 
+## Adjusting Axioms
+
+Axioms in `ParserCombinators/Lemmas.lean` may be adjusted when the current
+statement blocks progress, but only under this workflow:
+
+- Draft the smallest replacement statement that downstream code needs.
+- Sketch a viable proof outline showing how the new axiom could later become a
+  theorem from the existing definitions and helper lemmas.
+- Use a sub-agent to review the proposed statement and proof outline before
+  editing the axiom.  Ask it to look for missing hypotheses, false directions,
+  problematic equivalences, or a simpler provable statement.
+- Adjust the axiom only when the sub-agent is satisfied, or when its concrete
+  corrections have been incorporated.
+- Run `lake build` after the change.
+
+Use the repo-local skill at
+`skills/axiom-adjustment-review/SKILL.md` for this workflow.
+
 ## Coding Conventions
 
 - Follow the existing Lean style: explicit namespaces, small local helper

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Axiom Adjustment Review"
+  short_description: "Review Lean axiom changes with proof checks."
+  default_prompt: "Use this skill when adjusting axioms in ParserCombinators/Lemmas.lean or similar Lean proof scaffolding."
