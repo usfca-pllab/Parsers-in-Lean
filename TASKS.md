@@ -5,27 +5,23 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
 
 ## `ParserCombinators/Gen.lean`
 
-- [ ] Replace the two top-level correctness TODO comments with precise theorem
-  declarations and/or references to the completed theorem.
-  Existing markers:
+- [x] Replace the two top-level correctness TODO comments with precise theorem
+  references and the external-proof design choice.
+  Removed markers:
   - `TODO(maemre): correctness theorem (by injecting validity proofs above)`
   - `TODO(maemre): correctness theorem (sound/complete)`
-  Concrete shape:
+  Resolution:
   - [x] Soundness is now represented by:
     ```lean
     theorem gen_sound (cfg : @CFG α ν) n input :
       sound cfg n (gen (μ := List) cfg n) input
     ```
-  - [ ] Decide whether the "injecting validity proofs" TODO should become an
-    actual typed generator, for example a parser returning a subtype like
-    `{tree : ParseTree cfg // tree.Valid ∧ tree.root = Symbol.nonterm n}`, or
-    whether the external `gen_sound` theorem is the intended replacement.
-  - [ ] If the subtype route is chosen, define the subtype specification,
-    implement the typed wrapper around `gen'` or `gen`, and prove that erasing
-    proofs gives the existing generated parser behavior.
-  - [ ] If the external-proof route is chosen, remove the stale TODO comment
-    and add a short comment near `gen_sound` explaining that generated parsers
-    stay untyped while validity/root information is supplied by the theorem.
+  - [x] Chose the external-proof route: generated parsers continue to return
+    plain `ParseTree cfg` values, while validity/root information is supplied
+    by theorem statements such as `gen_sound` and the planned `gen_complete`.
+  - [x] Recorded the proof-carrying subtype parser route in `alternatives.md`.
+  - [x] Replaced the stale TODO comments in `Gen.lean` with a short design
+    comment.
 
 - [ ] Strengthen and prove the generated-parser completeness theorem.
   Current placeholder:
@@ -87,19 +83,6 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
   - Replaced the two `sorry`s ruling out impossible terminal/nonterminal subtree
     cases.
   - Completed the remaining child-parser reasoning using `h_recur`.
-
-- [ ] Remove or update the stale helper-lemma TODO comment.
-  Current marker:
-  - `TODO: helper lemmas (placeholders; proofs to be filled later)`
-  Concrete status:
-  - `mem_zip_index`, `runParser_traverse_origin`,
-    `runParser_traverse_origin_bounded`, `runParser_traverse_result_bounds`,
-    `terminal'_sound`, `terminal'_bounded`, `failure_sound`,
-    `failure_bounded`, `sound_of_sup_sound`, and `bounded_of_sup_bounded` are
-    now proved.
-  - The remaining action is documentation cleanup in `Gen.lean`: replace the
-    placeholder comment with a neutral section comment such as "Traversal and
-    parser-constructor lemmas used by generated-parser soundness."
 
 ## `ParserCombinators/Lemmas.lean`
 

@@ -39,8 +39,10 @@ def gen' (cfg : @CFG α ν) (recur : ν → ParserM (tag := tag cfg) α μ (Pars
 
 def gen (cfg : @CFG α ν) : ν → ParserM (tag := tag cfg) α μ (ParseTree cfg) := memoize (g := gen' cfg)
 
--- TODO(maemre): correctness theorem (by injecting validity proofs above)
--- TODO(maemre): correctness theorem (sound/complete)
+-- Generated parsers return plain parse trees.  Correctness information is
+-- attached externally by the soundness theorem below and the planned
+-- completeness theorem, rather than by injecting validity proofs into parser
+-- result types.
 
 -- NOTE: We are proving these for Lists, we can later on generalize it to
 -- other "sensible" collections that preserve parts of a list.
@@ -81,7 +83,7 @@ lemma mem_zip_index_pair
   · have hsnd := congrArg Prod.snd hi
     simpa [i', h_len_zip] using hsnd
 
--- TODO: helper lemmas (placeholders; proofs to be filled later)
+-- Traversal and parser-constructor lemmas used by generated-parser soundness.
 omit [BEq α] [Hashable ν] [Fintype ν] in
 lemma mem_zip_index
   {rule : List (Symbol α ν)} {subtrees : List (ParseTree (α := α) cfg)}
