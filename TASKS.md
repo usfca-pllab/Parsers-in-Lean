@@ -13,7 +13,10 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
 - [ ] Fill the helper lemmas currently left as placeholders:
   - [x] `mem_zip_index`
   - [ ] `runParser_mem_bounds`
-  - [ ] `terminal'_sound`
+    - Current statement is too broad for arbitrary `ParserM`: a lifted primitive
+      parser can put results at invalid keys.  It should be replaced by a
+      generated-parser or result-membership boundedness invariant.
+  - [x] `terminal'_sound`
 
 - [x] Finish the `gen_sound` proof.
   Completed pieces:
@@ -35,6 +38,10 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
 - [ ] Replace `runParser_map` with a theorem.
 
 - [ ] Replace `runParser_pure` with a theorem.
+
+- [ ] Replace `mem_runParser_terminal_iff` with a theorem.
+  This List-specific terminal semantics axiom was added as the narrow primitive
+  fact needed to prove `terminal'_sound`.
 
 - [ ] Replace `mem_runParser_bind_iff_eq_bind_mem_runParser` with a theorem.
   There are two declarations in the file: an older commented-out statement

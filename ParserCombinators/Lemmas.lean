@@ -40,6 +40,17 @@ axiom runParser_pure
   (start n : ℕ)
   : (runParser (tag := tag) (pure a) input start).1[n]? = if n = start then some (pure (f := μ) a) else none
 
+-- Primitive terminal semantics, stated in the membership form used by soundness proofs.
+-- Proof outline: unfold `terminal'`, `runParser`, `ParserM.lift`, and `ParserM.lower`;
+-- the lifted primitive parser either returns the singleton map `{start + 1 ↦ [a]}` when
+-- `input[start]? = some a`, or the empty map otherwise.
+axiom mem_runParser_terminal_iff
+  [DecidableEq β]
+  (a x : β) (input : Array β) (start end_pos : ℕ)
+  : x ∈ (runParser (tag := tag)
+        (terminal' (tag := tag) (μ := List) a) input start).1.getD end_pos [] ↔
+      some a = input[start]? ∧ end_pos = start + 1 ∧ x = a
+
 /-
 -- The axiom below is incorrect
 axiom mem_runParser_bind_iff_eq_bind_mem_runParser

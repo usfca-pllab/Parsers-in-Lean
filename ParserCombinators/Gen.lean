@@ -56,6 +56,14 @@ abbrev complete (cfg : @CFG α ν) (n : ν) (p : ParserM (tag := tag cfg) α Lis
   (_h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
   := ∃ tree, tree ∈ (runParser p input).1[0]?.getD ⊥
 
+abbrev result_bounded (cfg : @CFG α ν)
+  (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
+  :=
+  ∀ start end_ : ℕ,
+  start ≤ input.size →
+  ∀ tree, tree ∈ (runParser p input start).1.getD end_ [] →
+    start ≤ end_ ∧ end_ ≤ input.size
+
 omit [BEq α] [DecidableEq α] in
 lemma mem_zip_index_pair
   {xs : List α} {ys : List β}
@@ -160,6 +168,172 @@ lemma runParser_traverse_origin
               · simpa using h_e'
               · simpa using h_mem'
 
+omit [Fintype ν] in
+lemma runParser_traverse_origin_bounded
+  {cfg : @CFG α ν}
+  {xs : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {input : Array α} {start end_ : ℕ} {result : List (ParseTree cfg)}
+  (h_xs : ∀ j : Fin xs.length, ∀ s e : ℕ,
+    s ≤ input.size →
+    ∀ tree, tree ∈ (runParser (tag := tag cfg) xs[j] input s).1.getD e [] →
+      s ≤ e ∧ e ≤ input.size)
+  (h_start : start ≤ input.size)
+  (h_result : result ∈ (runParser (tag := tag cfg) (List.traverse id xs) input start).1.getD end_ [])
+  (i : Fin result.length)
+  : ∃ j : Fin xs.length, j.1 = i.1 ∧
+      ∃ s e : ℕ, ∃ h : e ∈ (runParser (tag := tag cfg) xs[j] input s).1,
+        result[i] ∈ (runParser (tag := tag cfg) xs[j] input s).1[e]'h ∧
+        s ≤ e ∧ e ≤ input.size := by
+  induction xs generalizing start end_ result with
+  | nil =>
+      cases result with
+      | nil => exact Fin.elim0 i
+      | cons head tail =>
+          have h_len := runParser_traverse_preserves_length (tag := tag cfg) input
+            ([] : List (ParserM (tag := tag cfg) α List (ParseTree cfg))) start end_ (head :: tail) h_result
+          simp at h_len
+  | cons head tail ih =>
+      rw [List.traverse, seq_eq_bind] at h_result
+      simp at h_result
+      have h_end_mem : end_ ∈ (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1 := by
+        rw [Std.HashMap.getD_eq_getD_getElem?] at h_result
+        unfold Option.getD at h_result
+        cases h_opt : (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1[end_]?
+        · simp [h_opt] at h_result
+        · exact (Std.HashMap.getElem?_eq_some_iff.mp h_opt).1
+      rw [Std.HashMap.getD_eq_getD_getElem?] at h_result
+      rw [Std.HashMap.getElem?_eq_some_getElem h_end_mem] at h_result
+      let r := (runParser
+        (head >>= fun a => List.cons a <$> List.traverse id tail)
+        input start).1[end_]
+      have h_split := by
+        apply (mem_runParser_bind_iff_eq_bind_mem_runParser input head
+          (fun (a : ParseTree cfg) => List.cons a <$> List.traverse id tail)
+          (x := result) (r := r) (start := start) (end_pos := end_)).mp
+        constructor
+        · exact Std.HashMap.getElem?_eq_some_getElem h_end_mem
+        · simpa [r] using h_result
+      obtain ⟨split, s, h_split, h_result_in_bind⟩ := h_split
+      simp [runParser_map_getElem?_eq] at h_result_in_bind
+      cases result with
+      | nil =>
+          simp at h_result_in_bind
+      | cons result_head result_tail =>
+          simp at h_result_in_bind
+          obtain ⟨head_result, h_head_mem, tail_results, h_tail_results, h_tail_mem, h_result_eq⟩ := h_result_in_bind
+          cases h_result_eq
+          let h_split_mem := (Std.HashMap.getElem?_eq_some_iff.mp h_split).1
+          have h_split_val : (runParser head input start).1[split]'h_split_mem = s :=
+            (Std.HashMap.getElem?_eq_some_iff.mp h_split).2
+          have h_head_getD : result_head ∈ (runParser (tag := tag cfg) head input start).1.getD split [] := by
+            rw [Std.HashMap.getD_eq_getD_getElem?]
+            simp [h_split, h_head_mem]
+          have h_head_bounds := h_xs ⟨0, by simp⟩ start split h_start result_head h_head_getD
+          cases i using Fin.cases with
+          | zero =>
+              refine ⟨⟨0, by simp⟩, by simp, start, split, ?_, ?_, ?_⟩
+              · exact h_split_mem
+              · simpa [h_split_val] using h_head_mem
+              · exact h_head_bounds
+          | succ i_tail =>
+              have h_tail_mem_getD : result_tail ∈ (runParser (tag := tag cfg) (List.traverse id tail) input split).1.getD end_ [] := by
+                rw [Std.HashMap.getD_eq_getD_getElem?]
+                simp [h_tail_results, h_tail_mem]
+              have h_tail_bounds :
+                  ∀ j : Fin tail.length, ∀ s e : ℕ,
+                    s ≤ input.size →
+                    ∀ tree, tree ∈ (runParser (tag := tag cfg) tail[j] input s).1.getD e [] →
+                      s ≤ e ∧ e ≤ input.size := by
+                intro j s' e' h_s' tree h_tree
+                have h := h_xs ⟨j.1 + 1, Nat.succ_lt_succ j.2⟩ s' e' h_s' tree
+                simpa using h h_tree
+              have h_tail_origin := ih h_tail_bounds h_head_bounds.2 h_tail_mem_getD i_tail
+              obtain ⟨j, h_j, s', e', h_e', h_mem', h_bounds'⟩ := h_tail_origin
+              refine ⟨⟨j.1 + 1, Nat.succ_lt_succ j.2⟩, ?_, s', e', ?_, ?_, ?_⟩
+              · simp [h_j]
+              · simpa using h_e'
+              · simpa using h_mem'
+              · exact h_bounds'
+
+omit [Fintype ν] in
+lemma runParser_traverse_result_bounds
+  {cfg : @CFG α ν}
+  {xs : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {input : Array α} {start end_ : ℕ} {result : List (ParseTree cfg)}
+  (h_xs : ∀ j : Fin xs.length, ∀ s e : ℕ,
+    s ≤ input.size →
+    ∀ tree, tree ∈ (runParser (tag := tag cfg) xs[j] input s).1.getD e [] →
+      s ≤ e ∧ e ≤ input.size)
+  (h_start : start ≤ input.size)
+  (h_result : result ∈ (runParser (tag := tag cfg) (List.traverse id xs) input start).1.getD end_ [])
+  : start ≤ end_ ∧ end_ ≤ input.size := by
+  induction xs generalizing start end_ result with
+  | nil =>
+      rw [Std.HashMap.getD_eq_getD_getElem?, List.traverse, runParser_pure] at h_result
+      by_cases h_end : end_ = start
+      · subst h_end
+        exact ⟨le_rfl, h_start⟩
+      · simp [h_end] at h_result
+  | cons head tail ih =>
+      rw [List.traverse, seq_eq_bind] at h_result
+      simp at h_result
+      have h_end_mem : end_ ∈ (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1 := by
+        rw [Std.HashMap.getD_eq_getD_getElem?] at h_result
+        unfold Option.getD at h_result
+        cases h_opt : (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1[end_]?
+        · simp [h_opt] at h_result
+        · exact (Std.HashMap.getElem?_eq_some_iff.mp h_opt).1
+      rw [Std.HashMap.getD_eq_getD_getElem?] at h_result
+      rw [Std.HashMap.getElem?_eq_some_getElem h_end_mem] at h_result
+      let r := (runParser
+        (head >>= fun a => List.cons a <$> List.traverse id tail)
+        input start).1[end_]
+      have h_split := by
+        apply (mem_runParser_bind_iff_eq_bind_mem_runParser input head
+          (fun (a : ParseTree cfg) => List.cons a <$> List.traverse id tail)
+          (x := result) (r := r) (start := start) (end_pos := end_)).mp
+        constructor
+        · exact Std.HashMap.getElem?_eq_some_getElem h_end_mem
+        · simpa [r] using h_result
+      obtain ⟨split, s, h_split, h_result_in_bind⟩ := h_split
+      simp [runParser_map_getElem?_eq] at h_result_in_bind
+      cases result with
+      | nil =>
+          simp at h_result_in_bind
+      | cons result_head result_tail =>
+          simp at h_result_in_bind
+          obtain ⟨head_result, h_head_mem, tail_results, h_tail_results, h_tail_mem, h_result_eq⟩ := h_result_in_bind
+          cases h_result_eq
+          have h_head_getD : result_head ∈ (runParser (tag := tag cfg) head input start).1.getD split [] := by
+            rw [Std.HashMap.getD_eq_getD_getElem?]
+            simp [h_split, h_head_mem]
+          have h_head_bounds := h_xs ⟨0, by simp⟩ start split h_start result_head h_head_getD
+          have h_tail_mem_getD : result_tail ∈ (runParser (tag := tag cfg) (List.traverse id tail) input split).1.getD end_ [] := by
+            rw [Std.HashMap.getD_eq_getD_getElem?]
+            simp [h_tail_results, h_tail_mem]
+          have h_tail_bounds :
+              ∀ j : Fin tail.length, ∀ s e : ℕ,
+                s ≤ input.size →
+                ∀ tree, tree ∈ (runParser (tag := tag cfg) tail[j] input s).1.getD e [] →
+                  s ≤ e ∧ e ≤ input.size := by
+            intro j s' e' h_s' tree h_tree
+            have h := h_xs ⟨j.1 + 1, Nat.succ_lt_succ j.2⟩ s' e' h_s' tree
+            simpa using h h_tree
+          have h_tail_result_bounds := ih h_tail_bounds h_head_bounds.2 h_tail_mem_getD
+          exact ⟨Nat.le_trans h_head_bounds.1 h_tail_result_bounds.1, h_tail_result_bounds.2⟩
+
 lemma runParser_mem_bounds
   {cfg : @CFG α ν}
   {p : ParserM (tag := tag cfg) α List (ParseTree cfg)}
@@ -168,12 +342,55 @@ lemma runParser_mem_bounds
   : start ≤ end_ ∧ end_ ≤ input.size := by
   sorry
 
+set_option maxHeartbeats 800000 in
 lemma terminal'_sound
   {cfg : @CFG α ν}
   {a : α} {input : Array α} {start end_ : ℕ} {tree : ParseTree cfg}
   (h : tree ∈ (runParser (Leaf <$> terminal' (tag := tag cfg) a) input start).1.getD end_ [])
   : tree = Leaf a := by
-  sorry
+  rw [Std.HashMap.getD_eq_getD_getElem?] at h
+  rw [runParser_map_getElem?_eq] at h
+  cases h_opt : (runParser (tag := tag cfg) (terminal' (tag := tag cfg) (μ := List) a) input start).1[end_]? with
+  | none =>
+      simp [h_opt] at h
+  | some xs =>
+      simp [h_opt] at h
+      obtain ⟨x, h_x, h_tree⟩ := h
+      have h_x_getD : x ∈ (runParser (tag := tag cfg)
+          (terminal' (tag := tag cfg) (μ := List) a) input start).1.getD end_ [] := by
+        rw [Std.HashMap.getD_eq_getD_getElem?]
+        simp [h_opt, h_x]
+      have h_x' := (mem_runParser_terminal_iff (tag := tag cfg)
+        (a := a) (x := x) (input := input) (start := start) (end_pos := end_)).mp h_x_getD
+      exact h_tree.symm.trans (congrArg Leaf h_x'.2.2)
+
+omit [Fintype ν] in
+lemma terminal'_bounded
+  {cfg : @CFG α ν}
+  {a : α} {input : Array α}
+  : result_bounded cfg (Leaf <$> terminal' (tag := tag cfg) a) input := by
+  unfold result_bounded
+  intro start end_ h_start tree h_mem
+  rw [Std.HashMap.getD_eq_getD_getElem?] at h_mem
+  rw [runParser_map_getElem?_eq] at h_mem
+  cases h_opt : (runParser (tag := tag cfg) (terminal' (tag := tag cfg) (μ := List) a) input start).1[end_]? with
+  | none =>
+      simp [h_opt] at h_mem
+  | some xs =>
+      simp [h_opt] at h_mem
+      obtain ⟨x, h_x, _h_tree⟩ := h_mem
+      have h_x_getD : x ∈ (runParser (tag := tag cfg)
+          (terminal' (tag := tag cfg) (μ := List) a) input start).1.getD end_ [] := by
+        rw [Std.HashMap.getD_eq_getD_getElem?]
+        simp [h_opt, h_x]
+      have h_x' := (mem_runParser_terminal_iff (tag := tag cfg)
+        (a := a) (x := x) (input := input) (start := start) (end_pos := end_)).mp h_x_getD
+      obtain ⟨h_match, h_end, _h_x_eq⟩ := h_x'
+      have h_start_lt : start < input.size := by
+        exact (Array.getElem?_eq_some_iff.mp h_match.symm).1
+      constructor
+      · omega
+      · omega
 
 omit [Fintype ν] in
 lemma failure_empty (cfg : @CFG α ν) {start : ℕ} : (runParser (tag := tag cfg) (⊥ : ParserM α μ (ParseTree cfg)) input start).1.isEmpty := by
@@ -201,6 +418,13 @@ theorem failure_sound (cfg : @CFG α ν) (n : ν) (input : Array α) : sound cfg
   intro start end_ _h tree
   simp [Std.HashMap.getD_of_isEmpty, failure_empty]
   simp [Bot.bot, SemilatticeAlt.failure]
+
+omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
+theorem failure_bounded (cfg : @CFG α ν) (input : Array α) : result_bounded cfg ⊥ input
+  := by
+  unfold result_bounded
+  intro start end_ _h_start tree
+  simp [Std.HashMap.getD_of_isEmpty, failure_empty]
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 /-- The join operation on lists preserves soundness. -/
@@ -240,6 +464,37 @@ theorem sound_of_sup_sound (cfg : @CFG α ν) (n : ν) (p q : ParserM (tag := ta
     by_cases h_q_contains_0 : 0 ∈ (runParser q input).1
     · exact h_q tree h_mem
     · simp_all
+
+omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
+/-- The join operation on lists preserves result bounds. -/
+theorem bounded_of_sup_bounded (cfg : @CFG α ν) (p q : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
+  (h_p : result_bounded cfg p input) (h_q : result_bounded cfg q input) : result_bounded cfg (p ⊔ q) input
+  := by
+  unfold result_bounded at *
+  intro start end_ h_start tree h_mem
+  have h := runParser_sup_eq_sup_runParser p q input start
+  have h' := Std.HashMap.EquivQuot.getD_eq (s := SemilatticeAlt.setoid) (k := end_) (fallback := []) h
+  simp [SemilatticeAlt.setoid, List.memSetoid] at h'
+  dsimp [Subset, List.Subset] at *
+  replace h_mem := @h'.1 tree h_mem
+  dsimp [Max.max] at h_mem
+  by_cases h_p_contains_end_ : end_ ∈ (runParser p input start).1
+  · by_cases h_q_contains_end_ : end_ ∈ (runParser q input start).1
+    · have h' := Std.HashMap.unionSup_getD_both (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) h_p_contains_end_ h_q_contains_end_
+      simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h'
+      replace h_mem := @h'.1 tree h_mem
+      simp [Max.max, SemilatticeAlt.orElse] at h_mem
+      cases h_mem <;> rename_i h_mem
+      · exact h_p start end_ h_start tree (by simpa [Std.HashMap.getElem_eq_getD (fallback := [])] using h_mem)
+      · exact h_q start end_ h_start tree (by simpa [Std.HashMap.getElem_eq_getD (fallback := [])] using h_mem)
+    · have h' := Std.HashMap.unionSup_getD_of_right_not_contains (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) (fallback := []) (runParser p input start).1 (runParser q input start).1 h_q_contains_end_
+      simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h'
+      replace h_mem := @h'.1 tree h_mem
+      exact h_p start end_ h_start tree h_mem
+  · have h' := Std.HashMap.unionSup_getD_of_not_contains (s := SemilatticeAlt.setoid) (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid) (fallback := []) (runParser p input start).1 (runParser q input start).1 h_p_contains_end_
+    simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h'
+    replace h_mem := @h'.1 tree h_mem
+    exact h_q start end_ h_start tree h_mem
 
 set_option maxHeartbeats 800000 in
 theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg n) input := by
@@ -371,8 +626,7 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
                   have h_t : t = Leaf a := terminal'_sound (cfg := cfg) (a := a) (input := input)
                     (start := s) (end_ := e) (tree := t) h_t_mem
                   simpa [t] using h_t
-                simp [h_sub_i'] at h_terminal
-                exact h_terminal
+                simpa [h_sub_i'] using h_terminal
               cases h_node_is_leaf
             · rename_i a b
               obtain ⟨i, h_rule_i, h_sub_i⟩ := mem_zip_index_pair h_len h_mem
