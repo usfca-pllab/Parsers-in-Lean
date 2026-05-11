@@ -56,14 +56,109 @@ abbrev complete (cfg : @CFG α ν) (n : ν) (p : ParserM (tag := tag cfg) α Lis
   (_h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
   := ∃ tree, tree ∈ (runParser p input).1[0]?.getD ⊥
 
+omit [BEq α] [DecidableEq α] in
+lemma mem_zip_index_pair
+  {xs : List α} {ys : List β}
+  (h_len : xs.length = ys.length)
+  {x : α} {y : β}
+  (h_mem : (x, y) ∈ xs.zip ys)
+  : ∃ i : Fin xs.length, xs[i] = x ∧ ys[i] = y := by
+  obtain ⟨i, hi⟩ := List.mem_iff_get.mp h_mem
+  have h_len_zip : (xs.zip ys).length = xs.length := by
+    simp [List.length_zip, h_len]
+  let i' : Fin xs.length := ⟨i.1, by simpa [h_len_zip] using i.2⟩
+  refine ⟨i', ?_, ?_⟩
+  · have hfst := congrArg Prod.fst hi
+    simpa [i', h_len_zip] using hfst
+  · have hsnd := congrArg Prod.snd hi
+    simpa [i', h_len_zip] using hsnd
+
 -- TODO: helper lemmas (placeholders; proofs to be filled later)
+omit [BEq α] [Hashable ν] [Fintype ν] in
 lemma mem_zip_index
   {rule : List (Symbol α ν)} {subtrees : List (ParseTree (α := α) cfg)}
   (h_len : rule.length = subtrees.length)
   {a : ν} {n : ν} {rule' : { rule // rule ∈ cfg.rules n }} {children' : List (ParseTree cfg)}
   (h_mem : (Symbol.nonterm a, Node n rule' children') ∈ rule.zip subtrees)
   : ∃ i : Fin rule.length, rule[i] = Symbol.nonterm a ∧ subtrees[i] = Node n rule' children' := by
-  sorry
+  exact mem_zip_index_pair h_len h_mem
+
+omit [Fintype ν] in
+lemma runParser_traverse_origin
+  {cfg : @CFG α ν}
+  {γ : Type u} [DecidableEq γ]
+  {xs : List (ParserM (tag := tag cfg) α List γ)}
+  {input : Array α} {start end_ : ℕ} {result : List γ}
+  (h_result : result ∈ (runParser (tag := tag cfg) (List.traverse id xs) input start).1.getD end_ [])
+  (i : Fin result.length)
+  : ∃ j : Fin xs.length, j.1 = i.1 ∧
+      ∃ s e : ℕ, ∃ h : e ∈ (runParser (tag := tag cfg) xs[j] input s).1,
+        result[i] ∈ (runParser (tag := tag cfg) xs[j] input s).1[e]'h := by
+  induction xs generalizing start end_ result with
+  | nil =>
+      cases result with
+      | nil => exact Fin.elim0 i
+      | cons head tail =>
+          have h_len := runParser_traverse_preserves_length (tag := tag cfg) input
+            ([] : List (ParserM (tag := tag cfg) α List γ)) start end_ (head :: tail) h_result
+          simp at h_len
+  | cons head tail ih =>
+      rw [List.traverse, seq_eq_bind] at h_result
+      simp at h_result
+      have h_end_mem : end_ ∈ (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1 := by
+        rw [Std.HashMap.getD_eq_getD_getElem?] at h_result
+        unfold Option.getD at h_result
+        cases h_opt : (runParser
+            (head >>= fun a =>
+              List.cons a <$> List.traverse id tail)
+            input start).1[end_]?
+        · simp [h_opt] at h_result
+        · exact (Std.HashMap.getElem?_eq_some_iff.mp h_opt).1
+      rw [Std.HashMap.getD_eq_getD_getElem?] at h_result
+      rw [Std.HashMap.getElem?_eq_some_getElem h_end_mem] at h_result
+      let r := (runParser
+        (head >>= fun a => List.cons a <$> List.traverse id tail)
+        input start).1[end_]
+      have h_split := by
+        apply (mem_runParser_bind_iff_eq_bind_mem_runParser input head
+          (fun (a : γ) => List.cons a <$> List.traverse id tail)
+          (x := result) (r := r) (start := start) (end_pos := end_)).mp
+        constructor
+        · exact Std.HashMap.getElem?_eq_some_getElem h_end_mem
+        · simpa [r] using h_result
+      obtain ⟨split, s, h_split, h_result_in_bind⟩ := h_split
+      simp [runParser_map_getElem?_eq] at h_result_in_bind
+      cases result with
+      | nil =>
+          simp at h_result_in_bind
+      | cons result_head result_tail =>
+          cases i using Fin.cases with
+          | zero =>
+              simp at h_result_in_bind
+              obtain ⟨head_result, h_head_mem, tail_results, h_tail_results, h_tail_mem, h_result_eq⟩ := h_result_in_bind
+              cases h_result_eq
+              let h_split_mem := (Std.HashMap.getElem?_eq_some_iff.mp h_split).1
+              have h_split_val : (runParser head input start).1[split]'h_split_mem = s :=
+                (Std.HashMap.getElem?_eq_some_iff.mp h_split).2
+              refine ⟨⟨0, by simp⟩, by simp, start, split, ?_, ?_⟩
+              · exact h_split_mem
+              · simpa [h_split_val] using h_head_mem
+          | succ i_tail =>
+              simp at h_result_in_bind
+              obtain ⟨head_result, h_head_mem, tail_results, h_tail_results, h_tail_mem, h_result_eq⟩ := h_result_in_bind
+              cases h_result_eq
+              have h_tail_mem_getD : result_tail ∈ (runParser (tag := tag cfg) (List.traverse id tail) input split).1.getD end_ [] := by
+                rw [Std.HashMap.getD_eq_getD_getElem?]
+                simp [h_tail_results, h_tail_mem]
+              have h_tail_origin := ih h_tail_mem_getD i_tail
+              obtain ⟨j, h_j, s', e', h_e', h_mem'⟩ := h_tail_origin
+              refine ⟨⟨j.1 + 1, Nat.succ_lt_succ j.2⟩, ?_, s', e', ?_, ?_⟩
+              · simp [h_j]
+              · simpa using h_e'
+              · simpa using h_mem'
 
 lemma runParser_mem_bounds
   {cfg : @CFG α ν}
@@ -146,7 +241,7 @@ theorem sound_of_sup_sound (cfg : @CFG α ν) (n : ν) (p q : ParserM (tag := ta
     · exact h_q tree h_mem
     · simp_all
 
-set_option pp.proofs true
+set_option maxHeartbeats 800000 in
 theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg n) input := by
   unfold gen
   revert input n
@@ -203,10 +298,19 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
             -- TODO: alternative: use some form of induction on rule + children (somehow ignoring cfg.rules)
             -- induce on `rule.zip subtrees`?
             have h_mem_subtrees (i : Fin subtrees.length) : ∃ s e : ℕ, ∃ h : e ∈ (runParser (mkParser rule[i]) input s).1, subtrees[i] ∈ (runParser (mkParser rule[i]) input s).1[e]'h := by
-              -- induction on i: when i goes up, we can push through the traverse.
-              -- the tricky bit is generalizing rule + subtrees (without capturing too many hypotheses) so that we can instantiate smaller lists
-              sorry
-            cases sym <;> cases subtree <;> simp_all
+              let parsers := rule.map mkParser
+              have h_subtrees_getD : subtrees ∈ (runParser (tag := tag cfg) (List.traverse id parsers) input start).1.getD end_ [] := by
+                rw [← Std.HashMap.getElem_eq_getD (fallback := [])]
+                simpa [children, parsers] using h_subtrees
+              have h_origin := runParser_traverse_origin (cfg := cfg) (xs := parsers)
+                (input := input) (start := start) (end_ := end_) (result := subtrees) h_subtrees_getD i
+              obtain ⟨j, h_j, s, e, h_e, h_tree_mem⟩ := h_origin
+              have h_parser : parsers[j] = mkParser rule[i] := by
+                simp [parsers, h_j]
+              refine ⟨s, e, ?_, ?_⟩
+              · simpa [h_parser] using h_e
+              · simpa [h_parser] using h_tree_mem
+            cases sym <;> cases subtree <;> simp only [ParseTree.Valid] at h_mem ⊢
             · rename_i a b
               have h_mem_zip : (Symbol.term a, Leaf b) ∈ rule.zip subtrees := by
                 simpa using h_mem
@@ -243,11 +347,55 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
               -- conclude a = b
               cases h_eq_leaf
               rfl
-            · sorry -- here, we need the fact that each subtree is obtained by the relevant rule so this case is impossible
-            · sorry -- ditto
+            · rename_i a n' rule' children'
+              obtain ⟨i, h_rule_i, h_sub_i⟩ := mem_zip_index_pair h_len h_mem
+              let i' : Fin subtrees.length := ⟨i.1, by simpa [h_len] using i.2⟩
+              obtain ⟨s, e, h_e, h_tree_mem⟩ := h_mem_subtrees i'
+              have h_rule_i' : rule[i'] = Symbol.term a := by
+                simpa [i', h_len] using h_rule_i
+              have h_sub_i' : subtrees[i'] = Node n' rule' children' := by
+                simpa [i', h_len] using h_sub_i
+              have h_tree_mem' : subtrees[i'] ∈ (runParser (mkParser rule[i']) input s).1.getD e ⊥ := by
+                simpa [Std.HashMap.getElem_eq_getD (fallback := ⊥)] using h_tree_mem
+              have h_tree_mem'' : subtrees[i'] ∈ (runParser (mkParser rule[i']) input s).1.getD e [] := by
+                simpa [Bot.bot] using h_tree_mem'
+              have h_rule_parser : mkParser rule[i'] = Leaf <$> terminal' a := by
+                simp [mkParser, h_rule_i']
+              have h_node_is_leaf : Node n' rule' children' = Leaf a := by
+                have h_terminal : subtrees[i'] = Leaf a := by
+                  set t := subtrees[i']
+                  have h_t_mem : t ∈ (runParser (tag := tag cfg) (Leaf <$> terminal' a) input s).1.getD e [] := by
+                    have h' := h_tree_mem''
+                    rw [h_rule_parser] at h'
+                    simpa [t] using h'
+                  have h_t : t = Leaf a := terminal'_sound (cfg := cfg) (a := a) (input := input)
+                    (start := s) (end_ := e) (tree := t) h_t_mem
+                  simpa [t] using h_t
+                simp [h_sub_i'] at h_terminal
+                exact h_terminal
+              cases h_node_is_leaf
+            · rename_i a b
+              obtain ⟨i, h_rule_i, h_sub_i⟩ := mem_zip_index_pair h_len h_mem
+              let i' : Fin subtrees.length := ⟨i.1, by simpa [h_len] using i.2⟩
+              obtain ⟨s, e, h_e, h_tree_mem⟩ := h_mem_subtrees i'
+              have h_rule_i' : rule[i'] = Symbol.nonterm a := by
+                simpa [i', h_len] using h_rule_i
+              have h_sub_i' : subtrees[i'] = Leaf b := by
+                simpa [i', h_len] using h_sub_i
+              have h_tree_mem' : subtrees[i'] ∈ (runParser (mkParser rule[i']) input s).1.getD e ⊥ := by
+                simpa [Std.HashMap.getElem_eq_getD (fallback := ⊥)] using h_tree_mem
+              have h_bounds : s ≤ e ∧ e ≤ input.size :=
+                runParser_mem_bounds (cfg := cfg) (p := mkParser rule[i']) (input := input) (start := s) (end_ := e) h_e
+              have h_tree_mem_recur : subtrees[i'] ∈ (runParser (recur a) input s).1.getD e ⊥ := by
+                simpa [mkParser, h_rule_i'] using h_tree_mem'
+              have h_tree_mem_leaf : Leaf (cfg := cfg) b ∈ (runParser (recur a) input s).1.getD e ⊥ := by
+                simpa [h_sub_i'] using h_tree_mem_recur
+              have h_valid_root : (Leaf (cfg := cfg) b).Valid ∧ (Leaf (cfg := cfg) b).root = Symbol.nonterm a :=
+                h_recur a input s e h_bounds (Leaf b) h_tree_mem_leaf
+              have h_root : (Leaf (cfg := cfg) b).root = Symbol.nonterm a := h_valid_root.2
+              simp at h_root
             · rename_i a n rule' children'
-              -- we also need to use h_mem to conclude the first fact.  The second should come from h_recur?
-              obtain ⟨i, h_rule_i, h_sub_i⟩ := mem_zip_index (cfg := cfg) h_len h_mem
+              obtain ⟨i, h_rule_i, h_sub_i⟩ := mem_zip_index_pair h_len h_mem
               let i' : Fin subtrees.length := ⟨i.1, by simpa [h_len] using i.2⟩
               obtain ⟨s, e, h_e, h_tree_mem⟩ := h_mem_subtrees i'
               have h_rule_i' : rule[i'] = Symbol.nonterm a := by
@@ -258,20 +406,17 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
                 simpa [Std.HashMap.getElem_eq_getD (fallback := ⊥)] using h_tree_mem
               have h_bounds : s ≤ e ∧ e ≤ input.size :=
                 runParser_mem_bounds (cfg := cfg) (p := mkParser rule[i']) (input := input) (start := s) (end_ := e) h_e
-              have h_sound : sound cfg a (mkParser rule[i']) input := by
-                simpa [mkParser, h_rule_i'] using h_recur a input
-              have h_valid_root := h_sound s e h_bounds (subtrees[i']) h_tree_mem'
-              have h_valid : (Node n rule' children').Valid := by
-                simpa [h_sub_i'] using h_valid_root.1
+              have h_tree_mem_recur : subtrees[i'] ∈ (runParser (recur a) input s).1.getD e ⊥ := by
+                simpa [mkParser, h_rule_i'] using h_tree_mem'
+              have h_tree_mem_node : Node n rule' children' ∈ (runParser (recur a) input s).1.getD e ⊥ := by
+                simpa [h_sub_i'] using h_tree_mem_recur
+              have h_valid_root : (Node n rule' children').Valid ∧ (Node n rule' children').root = Symbol.nonterm a :=
+                h_recur a input s e h_bounds (Node n rule' children') h_tree_mem_node
+              have h_valid : (Node n rule' children').Valid := h_valid_root.1
               have h_eq : a = n := by
-                have h_root : (Node n rule' children').root = Symbol.nonterm a := by
-                  simpa [h_sub_i'] using h_valid_root.2
+                have h_root : (Node n rule' children').root = Symbol.nonterm a := h_valid_root.2
                 simpa using h_root.symm
-              exact And.intro h_eq h_valid
-            -- TODO: unpack children, use induction to get the expected tree via `recur`
-            -- have h_head := h_recur head input start split (by sorry) -- the s from ∃s of the bind lemma goes here
-            -- simp [*] at h_head
-
+              exact And.intro h_eq (by simpa [ParseTree.Valid] using h_valid)
         · simp [Bot.bot, SemilatticeAlt.failure] at h_tree
 
 end Gen

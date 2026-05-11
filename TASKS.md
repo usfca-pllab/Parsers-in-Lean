@@ -11,17 +11,16 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
   - `TODO(maemre): correctness theorem (sound/complete)`
 
 - [ ] Fill the helper lemmas currently left as placeholders:
-  - `mem_zip_index`
-  - `runParser_mem_bounds`
-  - `terminal'_sound`
+  - [x] `mem_zip_index`
+  - [ ] `runParser_mem_bounds`
+  - [ ] `terminal'_sound`
 
-- [ ] Finish the `gen_sound` proof.
-  Current missing pieces:
-  - Prove the local traversal-origin claim `h_mem_subtrees`.
-  - Replace the two `sorry`s ruling out impossible terminal/nonterminal subtree
+- [x] Finish the `gen_sound` proof.
+  Completed pieces:
+  - Proved the local traversal-origin claim `h_mem_subtrees`.
+  - Replaced the two `sorry`s ruling out impossible terminal/nonterminal subtree
     cases.
-  - Complete the remaining child-parser reasoning noted by the TODO about
-    unpacking children and using `h_recur`.
+  - Completed the remaining child-parser reasoning using `h_recur`.
 
 - [ ] Revisit the TODO about the proof shape around `rule.zip subtrees`.
   The current note suggests an induction over the rule and children may be a
