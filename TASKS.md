@@ -12,10 +12,12 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
 
 - [ ] Fill the helper lemmas currently left as placeholders:
   - [x] `mem_zip_index`
-  - [ ] `runParser_mem_bounds`
-    - Current statement is too broad for arbitrary `ParserM`: a lifted primitive
-      parser can put results at invalid keys.  It should be replaced by a
-      generated-parser or result-membership boundedness invariant.
+  - [x] Replace unsound `runParser_mem_bounds` with `result_bounded`
+    invariants.
+    - The original arbitrary-`ParserM` statement was removed.
+    - Added boundedness lemmas for terminals, failure, joins, and traversal.
+    - Strengthened `gen_sound`'s memoization induction predicate to carry both
+      `sound` and `result_bounded`.
   - [x] `terminal'_sound`
 
 - [x] Finish the `gen_sound` proof.
