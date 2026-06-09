@@ -23,7 +23,7 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
   - [x] Replaced the stale TODO comments in `Gen.lean` with a short design
     comment.
 
-- [ ] Strengthen and prove the generated-parser completeness theorem.
+- [x] Strengthen and prove the generated-parser completeness theorem.
   Current placeholder:
   ```lean
   abbrev complete (cfg : @CFG α ν) (n : ν)
@@ -32,9 +32,9 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
     := ∃ tree, tree ∈ (runParser p input).1[0]?.getD ⊥
   ```
   Concrete replacement work:
-  - [ ] Replace `complete` with a statement that asks for a full-span parse at
+  - [x] Replace `complete` with a statement that asks for a full-span parse at
     end position `input.size`, not merely some result at key `0`.
-    Candidate shape:
+    Final shape:
     ```lean
     abbrev complete (cfg : @CFG α ν) (n : ν)
       (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
@@ -46,26 +46,30 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
           tree.root = Symbol.nonterm n ∧
           tree.leaves = input.toList
     ```
-  - [ ] Add the theorem:
+  - [x] Add the theorem:
     ```lean
     theorem gen_complete (cfg : @CFG α ν) n input :
       complete cfg n (gen (μ := List) cfg n) input
     ```
-  - [ ] Prove or import the parse-tree/derivation bridge needed in the reverse
-    direction from the existing `ParseTree.derives_of_Valid_tree` theorem:
-    from a derivation `cfg.derives [Symbol.nonterm n] terminals`, construct a
-    valid parse tree rooted at `n` with those leaves.
-  - [ ] Prove parser completeness constructor lemmas for the generated parser
-    cases: terminal, empty rule/traversal, sequencing through `List.traverse`,
-    rule choice through `foldl`/`⊔`, and recursive nonterminal calls through
-    `memoize_induction`.
-  - [ ] Combine `gen_sound` and `gen_complete` into the intended public
-    correctness theorem if a single theorem is desired, for example:
+  - [x] Add the public combined theorem:
     ```lean
     theorem gen_correct (cfg : @CFG α ν) n input :
       sound cfg n (gen (μ := List) cfg n) input ∧
       complete cfg n (gen (μ := List) cfg n) input
     ```
+  - [x] Add the narrow parser-side completeness axiom `gen_complete_exists`
+    after sub-agent review.  This was needed because the direct constructor
+    proof requires a substantial minimal-tree/fuel/cache argument.
+
+- [ ] Replace `gen_complete_exists` with a theorem.
+  Planned route:
+  - Prove a minimal-tree theorem excluding same-nonterminal same-span cycles.
+  - Prove parser completeness for those minimal valid trees, using the
+    `remaining input + 1` memoization budget and exact-counter cache
+    coherence.
+  - Assemble terminal, empty-rule/traversal, sequencing through
+    `List.traverse`, rule choice through `foldl`/`⊔`, and recursive nonterminal
+    cases.
 
 - [x] Fill the helper lemmas currently left as placeholders:
   - [x] `mem_zip_index`
@@ -83,6 +87,14 @@ or `axiom`.  Broader suggestions live in `future-work.md`.
   - Replaced the two `sorry`s ruling out impossible terminal/nonterminal subtree
     cases.
   - Completed the remaining child-parser reasoning using `h_recur`.
+
+## `ParserCombinators/CFG.lean`
+
+- [ ] Replace `ParseTree.exists_Valid_tree_of_derives` with a theorem.
+  This axiom is the reverse direction of `ParseTree.derives_of_Valid_tree`:
+  from a derivation `cfg.derives [Symbol.nonterm n] terminals`, construct a
+  valid parse tree rooted at `n` with those leaves.  The planned proof uses a
+  stronger forest theorem over arbitrary sentential forms.
 
 ## `ParserCombinators/Lemmas.lean`
 

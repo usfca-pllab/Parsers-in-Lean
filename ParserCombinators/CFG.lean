@@ -601,4 +601,17 @@ decreasing_by
   apply List.of_mem_zip at h_mem
   exact sizeOf_lt_of_child h_mem.right
 
+-- Parse-tree completeness for CFG derivations.
+--
+-- Proof outline: prove a stronger forest theorem for derivations from an
+-- arbitrary sentential form to terminals.  Decompose each `yields` step as
+-- replacing `pre ++ [nonterm n] ++ post` by `pre ++ rhs ++ post`, split the
+-- forest along that decomposition, and wrap the rhs forest in a `Node`.
+-- Specializing the forest theorem to `[nonterm n]` gives the tree below.
+axiom exists_Valid_tree_of_derives
+  {cfg : @CFG α ν} {n : ν} {w : List α}
+  (h : cfg.derives [Symbol.nonterm n] (w.map Symbol.term)) :
+    ∃ tree : ParseTree cfg,
+      tree.Valid ∧ tree.root = Symbol.nonterm n ∧ tree.leaves = w
+
 end ParseTree

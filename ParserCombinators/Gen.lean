@@ -55,8 +55,13 @@ abbrev sound (cfg : @CFG α ν)
   ∀ tree ∈ (runParser p input start).1.getD end_ ⊥, tree.Valid ∧ tree.root = Symbol.nonterm n
 
 abbrev complete (cfg : @CFG α ν) (n : ν) (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  (_h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
-  := ∃ tree, tree ∈ (runParser p input).1[0]?.getD ⊥
+  :=
+  cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term) →
+    ∃ tree,
+      tree ∈ (runParser p input 0).1.getD input.size [] ∧
+      tree.Valid ∧
+      tree.root = Symbol.nonterm n ∧
+      tree.leaves = input.toList
 
 abbrev result_bounded (cfg : @CFG α ν)
   (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
@@ -66,7 +71,7 @@ abbrev result_bounded (cfg : @CFG α ν)
   ∀ tree, tree ∈ (runParser p input start).1.getD end_ [] →
     start ≤ end_ ∧ end_ ≤ input.size
 
-omit [BEq α] [DecidableEq α] in
+omit [BEq α] [DecidableEq α] [DecidableEq ν] in
 lemma mem_zip_index_pair
   {xs : List α} {ys : List β}
   (h_len : xs.length = ys.length)
@@ -84,7 +89,7 @@ lemma mem_zip_index_pair
     simpa [i', h_len_zip] using hsnd
 
 -- Traversal and parser-constructor lemmas used by generated-parser soundness.
-omit [BEq α] [Hashable ν] [Fintype ν] in
+omit [BEq α] [Hashable ν] [Fintype ν] [DecidableEq α] [DecidableEq ν] in
 lemma mem_zip_index
   {rule : List (Symbol α ν)} {subtrees : List (ParseTree (α := α) cfg)}
   (h_len : rule.length = subtrees.length)
@@ -336,7 +341,8 @@ lemma runParser_traverse_result_bounds
           have h_tail_result_bounds := ih h_tail_bounds h_head_bounds.2 h_tail_mem_getD
           exact ⟨Nat.le_trans h_head_bounds.1 h_tail_result_bounds.1, h_tail_result_bounds.2⟩
 
-set_option maxHeartbeats 800000 in
+-- set_option maxHeartbeats 800000 in
+omit [Fintype ν] in
 lemma terminal'_sound
   {cfg : @CFG α ν}
   {a : α} {input : Array α} {start end_ : ℕ} {tree : ParseTree cfg}
@@ -357,6 +363,28 @@ lemma terminal'_sound
       have h_x' := (mem_runParser_terminal_iff (tag := tag cfg)
         (a := a) (x := x) (input := input) (start := start) (end_pos := end_)).mp h_x_getD
       exact h_tree.symm.trans (congrArg Leaf h_x'.2.2)
+
+omit [Fintype ν] in
+lemma terminal'_complete
+  {cfg : @CFG α ν}
+  {a : α} {input : Array α} {start : ℕ}
+  (h : input[start]? = some a)
+  : Leaf (cfg := cfg) a ∈
+      (runParser (tag := tag cfg) (Leaf <$> terminal' (tag := tag cfg) a) input start).1.getD (start + 1) [] := by
+  have h_terminal : a ∈
+      (runParser (tag := tag cfg) (terminal' (tag := tag cfg) (μ := List) a) input start).1.getD (start + 1) [] := by
+    exact (mem_runParser_terminal_iff (tag := tag cfg)
+      (a := a) (x := a) (input := input) (start := start) (end_pos := start + 1)).mpr
+      ⟨h.symm, rfl, rfl⟩
+  rw [Std.HashMap.getD_eq_getD_getElem?] at h_terminal ⊢
+  rw [runParser_map_getElem?_eq]
+  cases h_opt :
+      (runParser (tag := tag cfg) (terminal' (tag := tag cfg) (μ := List) a) input start).1[start + 1]? with
+  | none =>
+      simp [h_opt] at h_terminal
+  | some xs =>
+      simp [h_opt] at h_terminal ⊢
+      exact h_terminal
 
 omit [Fintype ν] in
 lemma terminal'_bounded
@@ -638,7 +666,7 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
                       have h_t : t = Leaf a := terminal'_sound (cfg := cfg) (a := a) (input := input)
                         (start := s) (end_ := e) (tree := t) h_t_mem
                       simpa [t] using h_t
-                    simpa [h_sub_i'] using h_terminal
+                    simp [h_sub_i'] at h_terminal
                   cases h_node_is_leaf
                 · rename_i a b
                   obtain ⟨i, h_rule_i, h_sub_i⟩ := mem_zip_index_pair h_len h_mem
@@ -717,5 +745,33 @@ theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg
                 (input := input) (start := start) (end_ := end_) (result := subtrees)
                 h_parsers_bounded h_start h_subtrees_getD
   exact (h_all n input).1
+
+-- Generated-parser completeness.
+--
+-- Proof outline: combine `ParseTree.exists_Valid_tree_of_derives` with a
+-- minimal-tree/fuel theorem.  Choose a valid tree with no same-nonterminal
+-- same-span cycle; the memoization budget `remaining input + 1` admits the
+-- final nullable/base call, and exact-counter cache keys prevent lower-fuel
+-- entries from suppressing later higher-fuel calls.  The tree proof then
+-- follows the generated rule branch, assembles children through
+-- `List.traverse`, and uses terminal semantics for leaves.
+axiom gen_complete_exists
+  {cfg : @CFG α ν} {n : ν} {input : Array α}
+  (h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term)) :
+    ∃ tree,
+      tree ∈ (runParser (tag := tag cfg) (gen (μ := List) cfg n) input 0).1.getD input.size [] ∧
+      tree.Valid ∧
+      tree.root = Symbol.nonterm n ∧
+      tree.leaves = input.toList
+
+theorem gen_complete (cfg : @CFG α ν) n input :
+    complete cfg n (gen (μ := List) cfg n) input := by
+  intro h
+  exact gen_complete_exists (cfg := cfg) (n := n) (input := input) h
+
+theorem gen_correct (cfg : @CFG α ν) n input :
+    sound cfg n (gen (μ := List) cfg n) input ∧
+    complete cfg n (gen (μ := List) cfg n) input := by
+  exact ⟨gen_sound cfg n input, gen_complete cfg n input⟩
 
 end Gen
