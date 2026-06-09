@@ -309,6 +309,10 @@ instance : GetElem? (Counter τ) τ ℕ (fun m k => k ∈ m.unwrap) where
   getElem m k h := m.unwrap[k]
   getElem? m k := m.unwrap[k]?
 
+/-- Executable key for exact-counter memo cache entries. -/
+def toKey (counter : Counter τ) : MemoKey τ :=
+  counter.unwrap.toList
+
 end Counter
 
 -- NOTE: There is a counter for each tag and we saturate it in N steps where N = remaining string
@@ -316,15 +320,14 @@ end Counter
 -- as seen in Frost and Hafiz <https://dl.acm.org/doi/10.1145/1149982.1149988>.  This is how we
 -- guarantee that `memoize` terminates.
 
--- Ideally, we could try for a fixpoint-like approach where our initial results are empty and we
--- gradually re-run the parser until it saturates? This might get tricky, though.
+-- The intended direction is recursive memoization with counter-aware cache
+-- entries, not a separate chart/worklist fixed-point parser.
 
 --
--- We need one more ingredient:
---
--- 1. Each tag has correct data, e.g. t ∈ memo → memo.get? t ⊆ memoize g pos
---
--- (1) will ensure that we always produce correct results.
+-- Future correctness invariant: each stored `(counterKey, pos)` entry for a
+-- tag contains results computed by `memoize` at that exact counter key and
+-- position.
+set_option linter.unusedVariables false in
 def memoize [Monad μ] [Traversable μ] [Fintype τ]
   (counter : Counter τ := Counter.empty)
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t)) (t : τ)
@@ -332,19 +335,18 @@ def memoize [Monad μ] [Traversable μ] [Fintype τ]
   if h : counter[t]? = some 0 then ⊥
   else
     lift $ fun pos => do
-      let positionMap := (← get).getD t ⊥
       -- Check if we have cached results for this tag and position
-      match positionMap[pos]? with
+      let key : MemoEntryKey τ := (Counter.toKey counter, pos)
+      let positionMap := (← get).getD t ⊥
+      match positionMap[key]? with
       | some cachedResult => pure cachedResult
       | none =>
-        -- No cached result for this position, compute and cache
-        let results ← lower (g (memoize (counter.dec t ((← read).size - pos)) g) t) pos
-        -- Cache the new results
-        modifyGet $ fun memo =>
-          let positionMap := memo.getD t ⊥
-          let results := results ⊔ positionMap.getD pos ⊥
-          -- TODO: use alter
-          (results, memo.insert t $ positionMap.insert pos results)
+          -- No cached results for this position + fuel, compute and cache
+          let results ← lower (g (memoize (counter.dec t ((← read).size - pos + 1)) g) t) pos
+          modifyGet $ fun memo =>
+            let positionMap := memo.getD t ⊥
+            -- TODO: use alter
+            (results, memo.insert t $ positionMap.insert key results)
 termination_by counter
 decreasing_by
   apply Counter.dec_lt_if_not_zero h
@@ -543,5 +545,31 @@ def leftRecMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const USt
   concat (recur ()) (terminal "a") ⊔ terminal "a"
   ) ()
 
--- this still causes stack overflow because we don't have left recursion detection
--- #guard (runParser' leftRecMemo "aaa").1.toList == [(5, Const.some { down := "aaa" })]
+#guard (runParser' leftRecMemo "aaa").1.toList == [(1, Const.some (ULift.up "a")), (2, Const.some (ULift.up "aa")), (3, Const.some (ULift.up "aaa"))]
+
+-- Cache-hit behavior checks for memoized parser families.
+def repeatedCacheHitMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString :=
+  (memoize (τ := Unit) Counter.empty $ fun recur (_ : Unit) =>
+    recur () ⊔ recur () ⊔ terminal "a"
+  ) ()
+
+#guard (runParser' repeatedCacheHitMemo "a").1.toList == [(1, Const.some (ULift.up "a"))]
+
+def sameTagDifferentPositionMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString :=
+  (memoize (τ := Unit) Counter.empty $ fun recur (_ : Unit) =>
+    concat (terminal "a") (recur ()) ⊔ terminal "b"
+  ) ()
+
+#guard (runParser' sameTagDifferentPositionMemo "aab").1.toList == [(3, Const.some (ULift.up "aab"))]
+#guard (runParser' sameTagDifferentPositionMemo "b").1.toList == [(1, Const.some (ULift.up "b"))]
+
+def oneFuelUnitCounter : Counter Unit :=
+  (Counter.empty (τ := Unit)).insert () 1
+
+def fuelSensitiveCacheMemo : ParserM (τ := Unit) (tag := fun _ => UString) UChar Const UString :=
+  let leftRecursive := fun recur (_ : Unit) =>
+    concat (recur ()) (terminal "a") ⊔ terminal "a"
+  (memoize (τ := Unit) oneFuelUnitCounter leftRecursive ()) ⊔
+    memoize (τ := Unit) Counter.empty leftRecursive ()
+
+#guard (runParser' fuelSensitiveCacheMemo "aaa").1.toList == [(1, Const.some (ULift.up "a")), (2, Const.some (ULift.up "aa")), (3, Const.some (ULift.up "aaa"))]

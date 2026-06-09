@@ -58,11 +58,15 @@ instance [Monad μ] [s : Setoid σ] [Semilatticeoid σ s] : MonadStateOf σ (MSt
 example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
   Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap (Range ℕ) (μ (typ t))))
 
+abbrev MemoKey (τ : Type u) := List (τ × ℕ)
+
+abbrev MemoEntryKey (τ : Type u) := MemoKey τ × ℕ
+
 -- A semilattice for MemoData
 --
 -- this fixes the tag type
 abbrev MemoData {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
-  Std.DHashMap τ (fun t => Std.HashMap ℕ (Std.HashMap ℕ (μ (typ t))))
+  Std.DHashMap τ (fun t => Std.HashMap (MemoEntryKey τ) (Std.HashMap ℕ (μ (typ t))))
 namespace MemoData
 variable {τ} {typ : τ → Type u} {μ : Type u → Type u} [BEq τ] [DecidableEq τ] [Hashable τ] [Monad μ]
 
@@ -72,7 +76,7 @@ variable {τ} {typ : τ → Type u} {μ : Type u → Type u} [BEq τ] [Decidable
 @[simp]
 def Equiv {typ : τ → Type u} [semilat_μ : SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)] (a b : MemoData typ μ) : Prop :=
   let f (t : τ) m := Quotient.mk (Std.HashMap.isSetoid
-     (α := ℕ)
+     (α := MemoEntryKey τ)
      (β := (Std.HashMap ℕ (μ (typ t))))
      (s := Std.HashMap.isSetoid (s := semilat_μ.setoid)))
      m
@@ -118,12 +122,12 @@ private lemma mem_map_Equiv {α : Type u} {β δ : α → Type v} {k : α} {f : 
 
 @[inline]
 abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid
-     (α := ℕ)
+     (α := MemoEntryKey τ)
      (β := (Std.HashMap ℕ (μ (typ t))))
      (s := Std.HashMap.isSetoid (s := SemilatticeAlt.setoid)))
 
 example (k : τ) [LawfulBEq τ] [DecidableEq τ] [s : Setoid (μ (typ k))] [Semilatticeoid (μ (typ k)) s]
-  [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (Std.HashMap ℕ (Std.HashMap ℕ (μ (typ k)))) (Std.HashMap.isSetoid (s := Std.HashMap.isSetoid)) := by
+  [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (Std.HashMap (MemoEntryKey τ) (Std.HashMap ℕ (μ (typ k)))) (Std.HashMap.isSetoid (s := Std.HashMap.isSetoid)) := by
   infer_instance
 
 private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [LawfulBEq τ]
