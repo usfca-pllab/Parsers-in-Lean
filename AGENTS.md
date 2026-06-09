@@ -37,6 +37,21 @@ When changing proofs:
 - Preserve existing theorem statements unless the surrounding definitions force
   a sharper statement.
 
+## Memoization Priority
+
+The key contribution of this project is verified memoization, so changes to
+`memoize` must preserve proper cache reuse and the intended performance
+characteristics.  Do not replace memoized behavior with proof-friendly
+recomputation as a final design.  If cache coherence blocks completeness,
+prefer designs that keep efficient reuse, such as fuel-aware cache entries,
+saturation markers, or counter-dominance reuse.  Do not switch to chart parsing
+or a separate worklist/fixed-point parser as a substitute for recursive
+memoization.
+
+The current baseline is exact-counter memoization: cache entries are keyed by
+tag, input position, and the executable counter key.  A cached result should be
+reused only when the requested counter key is the same.
+
 ## Adjusting Axioms
 
 Axioms in `ParserCombinators/Lemmas.lean` may be adjusted when the current
@@ -55,6 +70,21 @@ statement blocks progress, but only under this workflow:
 Use the repo-local skill at
 `skills/axiom-adjustment-review/SKILL.md` for this workflow.
 
+## Adjusting Theorem Statements
+
+Public theorem statements and definition-like theorem contracts may be adjusted
+when the current statement no longer matches the implementation, but use the
+same review discipline as axiom adjustments:
+
+- Draft the smallest replacement statement.
+- Sketch a viable proof outline from existing definitions, helper lemmas, and
+  allowed axioms.
+- Use a sub-agent to review the replacement before editing the theorem shape.
+- Run `lake build` after the change.
+
+Use the repo-local skill at
+`skills/theorem-adjustment-review/SKILL.md` for this workflow.
+
 ## Coding Conventions
 
 - Follow the existing Lean style: explicit namespaces, small local helper
@@ -67,8 +97,8 @@ Use the repo-local skill at
 
 ## Current Hot Spots
 
-- `Gen.gen_sound` is partially proved and depends on traversal/runParser facts
-  about child parsers.
+- `Gen.gen_complete_exists` is still an axiom standing in for the full
+  generated-parser completeness proof.
 - `Lemmas.lean` contains axioms for memoization induction, parser union,
   functor mapping, `pure`, and bind behavior.
 - `Memoized.memo`, `Memoized.memo'`, `memo_sound`, and `memo_complete` are
