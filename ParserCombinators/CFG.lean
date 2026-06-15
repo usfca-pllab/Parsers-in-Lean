@@ -108,6 +108,43 @@ example : my_cfg.yields [term a, nonterm 1, term c] [term a, term c] := by
 theorem yields_not_empty {cfg : @CFG α ν} {w : symbols α ν} (h : cfg.yields [] w) : False := by
   simp [yields, List.getRest] at h
 
+theorem yields_decompose
+  {cfg : @CFG α ν} {v u : symbols α ν}
+  (h : cfg.yields v u) :
+    ∃ pre n post rhs,
+      v = pre ++ [Symbol.nonterm n] ++ post ∧
+      rhs ∈ cfg.rules n ∧
+      u = pre ++ rhs ++ post := by
+  unfold yields yield at h
+  simp only [List.bind_eq_flatMap, List.mem_flatMap, List.mem_inits] at h
+  obtain ⟨pre, h_prefix, h_rest⟩ := h
+  cases h_get : List.getRest v pre with
+  | none =>
+      simp [h_get] at h_rest
+  | some rest =>
+      cases rest with
+      | nil =>
+          simp [h_get] at h_rest
+      | cons sym post =>
+          cases sym with
+          | term _ =>
+              simp [h_get] at h_rest
+          | nonterm n =>
+              simp [h_get] at h_rest
+              obtain ⟨rhs, h_rhs, h_u⟩ := h_rest
+              refine ⟨pre, n, post, rhs, ?_, h_rhs, ?_⟩
+              · obtain ⟨suffix, h_v⟩ := h_prefix
+                have h_suffix : suffix = Symbol.nonterm n :: post := by
+                  rw [← h_v] at h_get
+                  nth_rw 2 [show pre = pre ++ ([] : List (Symbol α ν)) by simp] at h_get
+                  change List.getRest (pre ++ suffix)
+                    (pre ++ ([] : List (Symbol α ν))) = some (Symbol.nonterm n :: post) at h_get
+                  rw [getRest_elim_prefix] at h_get
+                  simpa [List.getRest] using h_get
+                rw [← h_v, h_suffix]
+                simp
+              · simpa [List.append_assoc] using h_u.symm
+
 theorem yields_of_cons {cfg : @CFG α ν} (σ : Symbol α ν) (v w : symbols α ν) (h : cfg.yields v w)
   : cfg.yields (σ :: v) (σ :: w) := by
   simp_all
@@ -601,17 +638,264 @@ decreasing_by
   apply List.of_mem_zip at h_mem
   exact sizeOf_lt_of_child h_mem.right
 
+def forestLeaves {cfg : @CFG α ν} (forest : List (ParseTree cfg)) : List α :=
+  forest.flatMap fun tree => tree.leaves
+
+def ForestPairValid {cfg : @CFG α ν} : Symbol α ν × ParseTree cfg → Prop
+  | (Symbol.term a, Leaf b) => a = b
+  | (Symbol.nonterm n, subtree@(Node n' _ _)) => n = n' ∧ subtree.Valid
+  | _ => False
+
+def ForestValid {cfg : @CFG α ν}
+  (syms : symbols α ν) (forest : List (ParseTree cfg)) : Prop :=
+  syms.length = forest.length ∧
+    ∀ pair, pair ∈ syms.zip forest → ForestPairValid (cfg := cfg) pair
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem forestLeaves_map_leaf {cfg : @CFG α ν} (w : List α) :
+    forestLeaves (cfg := cfg) (w.map Leaf) = w := by
+  induction w with
+  | nil => rfl
+  | cons a rest ih =>
+      unfold forestLeaves at ih ⊢
+      simp only [List.map_cons, List.flatMap_cons]
+      have h_leaf : (Leaf (cfg := cfg) a).leaves = [a] := by
+        unfold leaves
+        rfl
+      rw [h_leaf]
+      simp [ih]
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem forestLeaves_append
+  {cfg : @CFG α ν} (xs ys : List (ParseTree cfg)) :
+    forestLeaves (xs ++ ys) = forestLeaves xs ++ forestLeaves ys := by
+  induction xs with
+  | nil => rfl
+  | cons x xs ih =>
+      unfold forestLeaves at ih ⊢
+      simp [ih, List.append_assoc]
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem leaves_node_eq_forestLeaves
+  {cfg : @CFG α ν} (n : ν) (rule : {rule // rule ∈ cfg.rules n})
+  (children : List (ParseTree cfg)) :
+    (Node (cfg := cfg) n rule children).leaves = forestLeaves children := by
+  simp [leaves, forestLeaves, List.flatMap_subtype, List.unattach_attach]
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_map_leaf {cfg : @CFG α ν} (w : List α) :
+    ForestValid (cfg := cfg) (w.map Symbol.term) (w.map Leaf) := by
+  induction w with
+  | nil =>
+      unfold ForestValid
+      simp
+  | cons a rest ih =>
+      unfold ForestValid at ih ⊢
+      constructor
+      · simp
+      · intro pair h_pair
+        simp only [List.map_cons, List.zip_cons_cons, List.mem_cons] at h_pair
+        cases h_pair with
+        | inl h_head =>
+            cases h_head
+            rfl
+        | inr h_tail =>
+            exact ih.2 pair h_tail
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem valid_node_of_ForestValid
+  {cfg : @CFG α ν} {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
+  {children : List (ParseTree cfg)}
+  (h : ForestValid (cfg := cfg) rule.val children) :
+    (Node (cfg := cfg) n rule children).Valid := by
+  unfold ForestValid at h
+  unfold Valid
+  constructor
+  · exact h.1
+  · intro pair h_pair
+    have h_pair_valid := h.2 pair h_pair
+    cases pair with
+    | mk sym tree =>
+        cases sym <;> cases tree <;> simp [ForestPairValid] at h_pair_valid ⊢ <;> exact h_pair_valid
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_singleton_node
+  {cfg : @CFG α ν} {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
+  {children : List (ParseTree cfg)}
+  (h : ForestValid (cfg := cfg) rule.val children) :
+    ForestValid (cfg := cfg) [Symbol.nonterm n] [Node (cfg := cfg) n rule children] := by
+  unfold ForestValid
+  constructor
+  · simp
+  · intro pair h_pair
+    simp at h_pair
+    cases h_pair
+    simp [ForestPairValid, valid_node_of_ForestValid h]
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_append
+  {cfg : @CFG α ν} {xs ys : symbols α ν}
+  {xf yf : List (ParseTree cfg)}
+  (hx : ForestValid (cfg := cfg) xs xf)
+  (hy : ForestValid (cfg := cfg) ys yf) :
+    ForestValid (cfg := cfg) (xs ++ ys) (xf ++ yf) := by
+  unfold ForestValid at hx hy ⊢
+  constructor
+  · simp [hx.1, hy.1]
+  · intro pair h_pair
+    rw [List.zip_append] at h_pair
+    · cases List.mem_append.mp h_pair with
+      | inl h_left => exact hx.2 pair h_left
+      | inr h_right => exact hy.2 pair h_right
+    · exact hx.1
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_append_inv
+  {cfg : @CFG α ν} {xs ys : symbols α ν} {forest : List (ParseTree cfg)}
+  (h : ForestValid (cfg := cfg) (xs ++ ys) forest) :
+    ∃ xf yf,
+      forest = xf ++ yf ∧
+      ForestValid (cfg := cfg) xs xf ∧
+      ForestValid (cfg := cfg) ys yf := by
+  induction xs generalizing forest with
+  | nil =>
+      refine ⟨[], forest, by simp, ?_, ?_⟩
+      · unfold ForestValid
+        simp
+      · simpa using h
+  | cons x xs ih =>
+      obtain ⟨h_len, h_pairs⟩ := h
+      cases forest with
+      | nil =>
+          simp at h_len
+      | cons tree forestTail =>
+          have h_head : ForestPairValid (cfg := cfg) (x, tree) := by
+            exact h_pairs (x, tree) (by simp)
+          have h_tail : ForestValid (cfg := cfg) (xs ++ ys) forestTail := by
+            unfold ForestValid
+            constructor
+            · simpa using h_len
+            · intro pair h_pair
+              exact h_pairs pair (by simp [h_pair])
+          obtain ⟨xf, yf, h_tail_eq, h_xs, h_ys⟩ := ih h_tail
+          refine ⟨tree :: xf, yf, ?_, ?_, h_ys⟩
+          · simp [h_tail_eq]
+          · unfold ForestValid at h_xs ⊢
+            constructor
+            · simp [h_xs.1]
+            · intro pair h_pair
+              simp at h_pair
+              cases h_pair with
+              | inl h_eq =>
+                  cases h_eq
+                  exact h_head
+              | inr h_tail_pair =>
+                  exact h_xs.2 pair h_tail_pair
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem exists_forest_of_terminals {cfg : @CFG α ν} (w : List α) :
+    ∃ forest : List (ParseTree cfg),
+      ForestValid (cfg := cfg) (w.map Symbol.term) forest ∧
+      forestLeaves forest = w := by
+  exact ⟨w.map Leaf, ForestValid_map_leaf w, forestLeaves_map_leaf w⟩
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_reverse_step_explicit
+  {cfg : @CFG α ν} {pre rhs post : symbols α ν}
+  {preForest rhsForest postForest : List (ParseTree cfg)}
+  {n : ν} (h_rule : rhs ∈ cfg.rules n)
+  (h_pre : ForestValid (cfg := cfg) pre preForest)
+  (h_rhs : ForestValid (cfg := cfg) rhs rhsForest)
+  (h_post : ForestValid (cfg := cfg) post postForest) :
+    ForestValid (cfg := cfg)
+      (pre ++ [Symbol.nonterm n] ++ post)
+      (preForest ++ [Node (cfg := cfg) n ⟨rhs, h_rule⟩ rhsForest] ++ postForest) := by
+  have h_node : ForestValid (cfg := cfg)
+      [Symbol.nonterm n] [Node (cfg := cfg) n ⟨rhs, h_rule⟩ rhsForest] :=
+    ForestValid_singleton_node h_rhs
+  have h_tail := ForestValid_append h_node h_post
+  have h_all := ForestValid_append h_pre h_tail
+  simpa [List.append_assoc] using h_all
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_reverse_step
+  {cfg : @CFG α ν} {pre rhs post : symbols α ν}
+  {forest : List (ParseTree cfg)}
+  {n : ν} (h_rule : rhs ∈ cfg.rules n)
+  (h : ForestValid (cfg := cfg) (pre ++ rhs ++ post) forest) :
+    ∃ newForest : List (ParseTree cfg),
+      ForestValid (cfg := cfg) (pre ++ [Symbol.nonterm n] ++ post) newForest ∧
+      forestLeaves newForest = forestLeaves forest := by
+  have h_assoc : ForestValid (cfg := cfg) (pre ++ (rhs ++ post)) forest := by
+    simpa [List.append_assoc] using h
+  obtain ⟨preForest, tailForest, h_forest, h_pre, h_tail⟩ :=
+    ForestValid_append_inv h_assoc
+  obtain ⟨rhsForest, postForest, h_tailForest, h_rhs, h_post⟩ :=
+    ForestValid_append_inv h_tail
+  let newForest :=
+    preForest ++ [Node (cfg := cfg) n ⟨rhs, h_rule⟩ rhsForest] ++ postForest
+  refine ⟨newForest, ?_, ?_⟩
+  · exact ForestValid_reverse_step_explicit h_rule h_pre h_rhs h_post
+  · subst newForest
+    rw [h_forest, h_tailForest]
+    simp [leaves_node_eq_forestLeaves, forestLeaves, List.append_assoc]
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem exists_Valid_tree_of_singleton_forest
+  {cfg : @CFG α ν} {n : ν} {w : List α} {forest : List (ParseTree cfg)}
+  (h_valid : ForestValid (cfg := cfg) [Symbol.nonterm n] forest)
+  (h_leaves : forestLeaves forest = w) :
+    ∃ tree : ParseTree cfg,
+      tree.Valid ∧ tree.root = Symbol.nonterm n ∧ tree.leaves = w := by
+  obtain ⟨h_len, h_pairs⟩ := h_valid
+  cases forest with
+  | nil =>
+      simp at h_len
+  | cons tree tail =>
+      cases tail with
+      | nil =>
+          have h_pair := h_pairs (Symbol.nonterm n, tree) (by simp)
+          cases tree with
+          | Leaf a =>
+              simp [ForestPairValid] at h_pair
+          | Node n' rule children =>
+              simp [ForestPairValid] at h_pair
+              obtain ⟨h_n, h_tree_valid⟩ := h_pair
+              cases h_n
+              refine ⟨Node n rule children, h_tree_valid, rfl, ?_⟩
+              simpa [forestLeaves] using h_leaves
+      | cons _ _ =>
+          simp at h_len
+
+theorem exists_forest_of_derives
+  {cfg : @CFG α ν} {sentential : symbols α ν} {w : List α}
+  (h : cfg.derives sentential (w.map Symbol.term)) :
+    ∃ forest : List (ParseTree cfg),
+      ForestValid (cfg := cfg) sentential forest ∧
+      forestLeaves forest = w := by
+  refine Relation.ReflTransGen.head_induction_on h ?_ ?_
+  · exact exists_forest_of_terminals w
+  · intro v u h_yields _h_derives ih
+    obtain ⟨forest, h_forest_valid, h_forest_leaves⟩ := ih
+    obtain ⟨pre, n, post, rhs, h_v, h_rhs, h_u⟩ := CFG.yields_decompose h_yields
+    have h_forest_valid' :
+        ForestValid (cfg := cfg) (pre ++ rhs ++ post) forest := by
+      simpa [h_u] using h_forest_valid
+    obtain ⟨newForest, h_new_valid, h_new_leaves⟩ :=
+      ForestValid_reverse_step (cfg := cfg) (n := n) h_rhs h_forest_valid'
+    refine ⟨newForest, ?_, ?_⟩
+    · simpa [h_v] using h_new_valid
+    · exact h_new_leaves.trans h_forest_leaves
+
 -- Parse-tree completeness for CFG derivations.
---
--- Proof outline: prove a stronger forest theorem for derivations from an
--- arbitrary sentential form to terminals.  Decompose each `yields` step as
--- replacing `pre ++ [nonterm n] ++ post` by `pre ++ rhs ++ post`, split the
--- forest along that decomposition, and wrap the rhs forest in a `Node`.
--- Specializing the forest theorem to `[nonterm n]` gives the tree below.
-axiom exists_Valid_tree_of_derives
+theorem exists_Valid_tree_of_derives
   {cfg : @CFG α ν} {n : ν} {w : List α}
   (h : cfg.derives [Symbol.nonterm n] (w.map Symbol.term)) :
     ∃ tree : ParseTree cfg,
       tree.Valid ∧ tree.root = Symbol.nonterm n ∧ tree.leaves = w
+  := by
+  obtain ⟨forest, h_forest_valid, h_forest_leaves⟩ :=
+    exists_forest_of_derives h
+  exact exists_Valid_tree_of_singleton_forest h_forest_valid h_forest_leaves
 
 end ParseTree

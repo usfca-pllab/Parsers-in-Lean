@@ -10,9 +10,11 @@ tracked in `TASKS.md`.
   Decide whether this is the main refinement relation for soundness,
   completeness, and memoization.
 
-- Decide the final relationship between `memoize`, `memo`, and `memo'`.
-  `memoize` is implemented with finite counters; `memo` and `memo'` appear to
-  be placeholders for single-parser and parser-family memoization.
+- Prove the final relationship between `memoize`, `memo`, `memo'`, and fuel.
+  `memo` and `memo'` are now homogeneous wrappers around the finite-counter
+  `memoize`; the old `memo_sound` / `memo_complete` sketches should return as
+  theorem statements only after the counter/fuel and cache-coherence invariants
+  are strong enough to support them.
 
 - Decide whether `withFuel` and `withFuel'` are only test scaffolding or the
   specification model for memoization correctness.

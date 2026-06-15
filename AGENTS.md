@@ -97,9 +97,12 @@ Use the repo-local skill at
 
 ## Current Hot Spots
 
-- `Gen.gen_complete_exists` is still an axiom standing in for the full
-  generated-parser completeness proof.
-- `Lemmas.lean` contains axioms for memoization induction, parser union,
-  functor mapping, `pure`, and bind behavior.
-- `Memoized.memo`, `Memoized.memo'`, `memo_sound`, and `memo_complete` are
-  placeholders separate from the implemented finite-counter `memoize`.
+- `Lemmas.lean` still contains broad axioms for parser union and bind behavior.
+  Each has a narrower state-aware replacement path under construction.
+- `Gen.gen_sound` no longer depends on the broad `memoize_induction` axiom; it
+  now uses `memoize_counter_induction` plus a start-state memoize exposure
+  lemma.  It still depends indirectly on state-insensitive sup/bind helper
+  lemmas, which are the next major proof targets.
+- `Memoized.memo` and `Memoized.memo'` are thin homogeneous wrappers around the
+  implemented finite-counter `memoize`.  Fuel/subsumption correctness for those
+  wrappers remains future proof work rather than an active placeholder theorem.

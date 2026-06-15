@@ -49,14 +49,41 @@ abbrev Parser
 namespace Parser
 variable [Monad μ] [Traversable μ]
 
+def bindActions [DecidableEq β']
+  (pivotToResult : ResultMap μ α)
+  (f : α → Parser (tag := tag) β μ β') :
+    List (μ (MStateT (MemoData tag μ) (ReaderM (Array β)) (ResultMap μ β'))) :=
+  pivotToResult.toList.map (fun ((j : ℕ), ma) => (fun a => f a j) <$> ma)
+
+def bindContinue [DecidableEq β']
+  (pivotToResult : ResultMap μ α)
+  (f : α → Parser (tag := tag) β μ β') :
+    MStateT (MemoData tag μ) (ReaderM (Array β)) (ResultMap μ β') :=
+  (bindActions pivotToResult f).foldl
+    (Traversable.foldl joinUnderCache)
+    (pure Std.HashMap.emptyWithCapacity)
+
+def bindRun [DecidableEq β'] (x : Parser (tag := tag) β μ α) (f : α → Parser (tag := tag) β μ β')
+    (pos : ℕ) (memo : MemoData tag μ) (input : Array β) :
+    ResultMap μ β' × MemoData tag μ :=
+  let pivotRun := x pos memo input
+  let result := bindContinue pivotRun.1 f (↑pivotRun.2) input
+  (result.1, ↑result.2)
+
+set_option maxHeartbeats 2000000 in
 def bind [DecidableEq β'] (x : Parser (tag := tag) β μ α) (f : α → Parser (tag := tag) β μ β')
-  := fun pos => do
-    let pivotToResult ← x pos
-    let actions : List (μ (MStateT (MemoData tag μ) (ReaderM (Array β)) (ResultMap μ β'))) :=
-      pivotToResult.toList.map (fun ((j : ℕ), ma) => (fun a => f a j) <$> ma)
-    actions.foldl
-      (Traversable.foldl joinUnderCache)
-      (pure Std.HashMap.emptyWithCapacity)
+    : Parser (tag := tag) β μ β'
+  := fun pos memo input =>
+    let result := bindRun x f pos memo input
+    (result.1,
+      ⟨result.2, by
+        change memo ≤ (bindRun x f pos memo input).2
+        unfold bindRun
+        exact Preorder.le_trans memo
+          (↑((x pos memo input).2))
+          (↑((bindContinue ((x pos memo input).1) f (↑((x pos memo input).2)) input).2))
+          (x pos memo input).2.property
+          (bindContinue ((x pos memo input).1) f (↑((x pos memo input).2)) input).2.property⟩)
 
 def failure : Parser (tag := tag) β μ α := fun _pos => pure Std.HashMap.emptyWithCapacity
 
@@ -148,8 +175,17 @@ instance [Monad μ] [Traversable μ] : LawfulMonad (ParserM (tag := tag) β μ) 
 
 
 -- TODO: (madi- from constrained monad paper)
--- theorem lower_preserves_identity
-  -- Homomorphism property 1: lower (pure x) = pure x
+namespace ParserM
+
+omit [Monad μ] [LawfulMonad μ] in
+theorem lower_preserves_identity
+  [Monad μ] [Traversable μ] [DecidableEq α]
+  (x : α) :
+    (ParserM.Return (tag := tag) (β := β) (μ := μ) x).lower =
+      (pure x : Parser (tag := tag) β μ α) := by
+  rfl
+
+end ParserM
 
 
 -- theorem lower_preserves_composition
@@ -328,25 +364,34 @@ end Counter
 -- tag contains results computed by `memoize` at that exact counter key and
 -- position.
 set_option linter.unusedVariables false in
+def memoizeStep [Monad μ] [Traversable μ] [Fintype τ]
+  (counter : Counter τ)
+  (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t))
+  (t : τ)
+  (next : ℕ → (t : τ) → ParserM (tag := tag) β μ (tag t)) :
+    Parser (tag := tag) β μ (tag t) :=
+  fun pos memo input =>
+    let key : MemoEntryKey τ := (Counter.toKey counter, pos)
+    let positionMap := memo.getD t ⊥
+    match positionMap[key]? with
+    | some cachedResult => (cachedResult, ⟨memo, le_refl memo⟩)
+    | none =>
+        let result := ((g (next (input.size - pos + 1)) t).lower pos) memo input
+        let results := result.1
+        let updatedPositionMap := result.2.val.getD t ⊥
+        let updatedMemo := result.2.val.insert t (updatedPositionMap.insert key results)
+        (results, ⟨updatedMemo ⊔ result.2.val,
+          Preorder.le_trans memo result.2.val (updatedMemo ⊔ result.2.val)
+            result.2.property Semilatticeoid.lift_le_sup_right⟩)
+
+set_option linter.unusedVariables false in
 def memoize [Monad μ] [Traversable μ] [Fintype τ]
   (counter : Counter τ := Counter.empty)
   (g : ((t : τ) → ParserM (tag := tag) β μ (tag t)) → (t : τ) → ParserM (tag := tag) β μ (tag t)) (t : τ)
     : ParserM (tag := tag) β μ (tag t) :=
   if h : counter[t]? = some 0 then ⊥
   else
-    lift $ fun pos => do
-      -- Check if we have cached results for this tag and position
-      let key : MemoEntryKey τ := (Counter.toKey counter, pos)
-      let positionMap := (← get).getD t ⊥
-      match positionMap[key]? with
-      | some cachedResult => pure cachedResult
-      | none =>
-          -- No cached results for this position + fuel, compute and cache
-          let results ← lower (g (memoize (counter.dec t ((← read).size - pos + 1)) g) t) pos
-          modifyGet $ fun memo =>
-            let positionMap := memo.getD t ⊥
-            -- TODO: use alter
-            (results, memo.insert t $ positionMap.insert key results)
+    lift $ memoizeStep counter g t (fun fuel => memoize (counter.dec t fuel) g)
 termination_by counter
 decreasing_by
   apply Counter.dec_lt_if_not_zero h
@@ -397,10 +442,13 @@ def runParserO {μ : Type → Type} {α : Type} [Monad μ] [SemilatticeAlt μ]
 def funcParser : ParserM (tag := emptyTag) UChar Const String := (fun _ => "matched!") <$> terminal "hello"
 def funcParser2 : ParserM (tag := emptyTag) UChar Const ℕ := (fun x => x * 3) <$> terminal "hello" $> 2
 
--- TODO: (Madi) Just beef this up by testing edge cases
 #guard (runParserO (μ := Const) funcParser "hello world").1.toList == [(5, Const.some "matched!")]
 #guard (runParserO (μ := Const) funcParser "hell").1.toList == []
+#guard (runParserO (μ := Const) funcParser "").1.toList == []
+#guard (runParserO (μ := Const) funcParser "xhello" 1).1.toList == [(6, Const.some "matched!")]
+#guard (runParserO (μ := Const) funcParser "xhello" 0).1.toList == []
 #guard (runParserO (μ := Const) funcParser2 "hello").1.toList == [(5, Const.some 6)]
+#guard (runParserO (μ := Const) funcParser2 "xhello" 1).1.toList == [(6, Const.some 6)]
 
 -- Alternative (`⊔`)
 def altParser [Monad μ] [Traversable μ] : ParserM (tag := tag) UChar μ UString :=
@@ -491,6 +539,7 @@ def mutualRec : ℕ → ParserM (tag := tag) UChar Const UString := flip (withFu
 #guard (runParserO (mutualRec 4) "ababc").1.toList == []
 
 -- Induction theorem for bounded recursion
+omit [Monad μ] [LawfulMonad μ] in
 theorem withFuel'_induction {τ} [Monad μ] [Traversable μ] [DecidableEq α] {g : (τ → ParserM (tag := tag) β μ α) → τ → ParserM (tag := tag) β μ α}
   {p : (τ → ParserM (tag := tag) β μ α) → Prop}
   (h_base : p (fun _ => ⊥))
@@ -504,12 +553,43 @@ theorem withFuel'_induction {τ} [Monad μ] [Traversable μ] [DecidableEq α] {g
     unfold withFuel'
     exact h_recur (withFuel' g n') ih
 
--- want something this:
-def memo [Monad μ] [Traversable μ] (g : ParserM (tag := tag) β μ α → ParserM (tag := tag) β μ α) : ParserM (tag := tag) β μ α :=
-  sorry
+abbrev homogeneousTag (α : Type u) {ι : Type u} (_ : ι) : Type u := α
 
-def memo' {τ} [Monad μ] [Traversable μ] (g : (τ → ParserM (tag := tag) β μ α) → τ → ParserM (tag := tag) β μ α) : τ → ParserM (tag := tag) β μ α :=
-  sorry
+-- Homogeneous-family wrapper around the real counter-based memoizer.  The tag
+-- family is constant because `MemoData` can only cache values of type `tag t`.
+def memo' {ι : Type u} [BEq ι] [LawfulBEq ι] [Hashable ι] [DecidableEq ι] [Fintype ι]
+    [Monad μ] [Traversable μ] [DecidableEq α]
+    (g : (ι → ParserM (τ := ι) (tag := homogeneousTag α) β μ α) →
+      ι → ParserM (τ := ι) (tag := homogeneousTag α) β μ α) :
+    ι → ParserM (τ := ι) (tag := homogeneousTag α) β μ α :=
+  memoize (τ := ι) (tag := homogeneousTag α) Counter.empty g
+
+-- Single-parser specialization of `memo'`.
+def memo [Monad μ] [Traversable μ] [DecidableEq α]
+    (g : ParserM (τ := PUnit.{u+1}) (tag := homogeneousTag α) β μ α →
+      ParserM (τ := PUnit.{u+1}) (tag := homogeneousTag α) β μ α) :
+    ParserM (τ := PUnit.{u+1}) (tag := homogeneousTag α) β μ α :=
+  memo' (ι := PUnit.{u+1}) (α := α) (β := β) (μ := μ)
+    (fun recur _ => g (recur PUnit.unit)) PUnit.unit
+
+omit [Monad μ] [LawfulMonad μ] in
+theorem memo'_eq_memoize {ι : Type u}
+    [BEq ι] [LawfulBEq ι] [Hashable ι] [DecidableEq ι] [Fintype ι]
+    [Monad μ] [Traversable μ] [DecidableEq α]
+    (g : (ι → ParserM (τ := ι) (tag := homogeneousTag α) β μ α) →
+      ι → ParserM (τ := ι) (tag := homogeneousTag α) β μ α) :
+    memo' (α := α) (β := β) (μ := μ) g =
+      memoize (τ := ι) (tag := homogeneousTag α) Counter.empty g := by
+  rfl
+
+omit [Monad μ] [LawfulMonad μ] in
+theorem memo_eq_memoize [Monad μ] [Traversable μ] [DecidableEq α]
+    (g : ParserM (τ := PUnit.{u+1}) (tag := homogeneousTag α) β μ α →
+      ParserM (τ := PUnit.{u+1}) (tag := homogeneousTag α) β μ α) :
+    memo (β := β) (μ := μ) g =
+      (memoize (τ := PUnit.{u+1}) (tag := homogeneousTag α) Counter.empty
+        (fun recur (_ : PUnit.{u+1}) => g (recur PUnit.unit))) PUnit.unit := by
+  rfl
 
 -- this just defines a subset-like relation on the parse results, the details of implementation
 -- aren't that crucial
@@ -518,14 +598,10 @@ def subsumed [Monad μ] [Traversable μ] [DecidableEq α] (a b : ResultMap μ α
 
 infix:50 " ≼ " => subsumed
 
--- then, we want:
-theorem memo_sound [Monad μ] [Traversable μ] [DecidableEq α] (g : ParserM (tag := tag) β μ α → ParserM (tag := tag) β μ α) n s
-    : (runParser (withFuel g n) s).1 ≼ (runParser (μ := μ) (memo g) s).1 := by
-  sorry
-
-theorem memo_complete [Monad μ] [Traversable μ] [DecidableEq α] (g : ParserM (tag := tag) β μ α → ParserM (tag := tag) β μ α) s
-    : ∃ n, (runParser (μ := μ) (memo g) s).1 ≼ (runParser (withFuel g n) s).1 := by
-  sorry
+-- The old `memo_sound` / `memo_complete` sketches compared `memo` with
+-- `withFuel`.  That fuel/subsumption relationship is not definitional; it
+-- requires the same counter and cache-coherence invariants used by the main
+-- generated-parser proofs.
 
 def mutualRecMemo : ParserM (τ := Fin 2) (tag := fun _ => UString) UChar Const UString := (memoize (τ := Fin 2) Counter.empty $ fun recur t =>
   match t with

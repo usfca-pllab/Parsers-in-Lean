@@ -1,144 +1,83 @@
-# Current Missing Work
+# TASKS
 
-This file tracks items that are already marked in the code as `TODO`, `sorry`,
-or `axiom`.  Broader suggestions live in `future-work.md`.
+This file tracks only the active path to the overall goal: remove the remaining
+proof assumptions from the verified memoizing parser-combinator core while
+preserving exact-counter memoization.
 
-## `ParserCombinators/Gen.lean`
+Detailed proof history, completed helper layers, old tactical TODOs, and audit
+snapshots live in `TASKS-trace.md`.  Statement refinements live in
+`refinements.md`.  Broader design ideas live in `future-work.md` and
+`memo-strategies.md`.
 
-- [x] Replace the two top-level correctness TODO comments with precise theorem
-  references and the external-proof design choice.
-  Removed markers:
-  - `TODO(maemre): correctness theorem (by injecting validity proofs above)`
-  - `TODO(maemre): correctness theorem (sound/complete)`
-  Resolution:
-  - [x] Soundness is now represented by:
-    ```lean
-    theorem gen_sound (cfg : @CFG α ν) n input :
-      sound cfg n (gen (μ := List) cfg n) input
-    ```
-  - [x] Chose the external-proof route: generated parsers continue to return
-    plain `ParseTree cfg` values, while validity/root information is supplied
-    by theorem statements such as `gen_sound` and the planned `gen_complete`.
-  - [x] Recorded the proof-carrying subtype parser route in `alternatives.md`.
-  - [x] Replaced the stale TODO comments in `Gen.lean` with a short design
-    comment.
+## Definition Of Done
 
-- [x] Strengthen and prove the generated-parser completeness theorem.
-  Current placeholder:
-  ```lean
-  abbrev complete (cfg : @CFG α ν) (n : ν)
-    (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-    (_h : cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term))
-    := ∃ tree, tree ∈ (runParser p input).1[0]?.getD ⊥
-  ```
-  Concrete replacement work:
-  - [x] Replace `complete` with a statement that asks for a full-span parse at
-    end position `input.size`, not merely some result at key `0`.
-    Final shape:
-    ```lean
-    abbrev complete (cfg : @CFG α ν) (n : ν)
-      (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-      :=
-      cfg.derives [Symbol.nonterm n] (input.toList.map Symbol.term) →
-        ∃ tree,
-          tree ∈ (runParser p input 0).1.getD input.size [] ∧
-          tree.Valid ∧
-          tree.root = Symbol.nonterm n ∧
-          tree.leaves = input.toList
-    ```
-  - [x] Add the theorem:
-    ```lean
-    theorem gen_complete (cfg : @CFG α ν) n input :
-      complete cfg n (gen (μ := List) cfg n) input
-    ```
-  - [x] Add the public combined theorem:
-    ```lean
-    theorem gen_correct (cfg : @CFG α ν) n input :
-      sound cfg n (gen (μ := List) cfg n) input ∧
-      complete cfg n (gen (μ := List) cfg n) input
-    ```
-  - [x] Add the narrow parser-side completeness axiom `gen_complete_exists`
-    after sub-agent review.  This was needed because the direct constructor
-    proof requires a substantial minimal-tree/fuel/cache argument.
+- [ ] No active `axiom` or `sorry` remains in:
+  `ParserCombinators/Gen.lean`, `ParserCombinators/Lemmas.lean`,
+  `ParserCombinators/Memoized.lean`, or `ParserCombinators/CFG.lean`.
+- [ ] `gen_sound`, `gen_complete`, and `gen_correct` build against the real
+  exact-counter `memoize` implementation.
+- [ ] `memoize` still reuses exact-counter cache entries; no proof-only
+  recomputation path replaces memoization.
+- [ ] `lake build` succeeds.
+- [ ] The final audit commands below report no live dependencies on retired
+  axiom names.
 
-- [ ] Replace `gen_complete_exists` with a theorem.
-  Planned route:
-  - Prove a minimal-tree theorem excluding same-nonterminal same-span cycles.
-  - Prove parser completeness for those minimal valid trees, using the
-    `remaining input + 1` memoization budget and exact-counter cache
-    coherence.
-  - Assemble terminal, empty-rule/traversal, sequencing through
-    `List.traverse`, rule choice through `foldl`/`⊔`, and recursive nonterminal
-    cases.
+## Active Work
 
-- [x] Fill the helper lemmas currently left as placeholders:
-  - [x] `mem_zip_index`
-  - [x] Replace unsound `runParser_mem_bounds` with `result_bounded`
-    invariants.
-    - The original arbitrary-`ParserM` statement was removed.
-    - Added boundedness lemmas for terminals, failure, joins, and traversal.
-    - Strengthened `gen_sound`'s memoization induction predicate to carry both
-      `sound` and `result_bounded`.
-  - [x] `terminal'_sound`
+### 1. Remove The Bind/Traverse Axiom
 
-- [x] Finish the `gen_sound` proof.
-  Completed pieces:
-  - Proved the local traversal-origin claim `h_mem_subtrees`.
-  - Replaced the two `sorry`s ruling out impossible terminal/nonterminal subtree
-    cases.
-  - Completed the remaining child-parser reasoning using `h_recur`.
+Live assumption:
 
-## `ParserCombinators/CFG.lean`
+- `ParserCombinators/Lemmas.lean`: `mem_runParser_bind_iff_eq_bind_mem_runParser`
 
-- [ ] Replace `ParseTree.exists_Valid_tree_of_derives` with a theorem.
-  This axiom is the reverse direction of `ParseTree.derives_of_Valid_tree`:
-  from a derivation `cfg.derives [Symbol.nonterm n] terminals`, construct a
-  valid parse tree rooted at `n` with those leaves.  The planned proof uses a
-  stronger forest theorem over arbitrary sentential forms.
+Live dependency:
 
-## `ParserCombinators/Lemmas.lean`
+- `ParserCombinators/Gen.lean`: `runParser_traverse_complete_cons`
 
-- [ ] Replace `memoize_induction` with a theorem.
+Required work:
 
-- [ ] Replace `runParser_sup_eq_sup_runParser` with a theorem.
+- [ ] Replace the fresh-state traversal completeness path with a lower-state or
+  exact-prefix traversal theorem that threads the memo state produced by the
+  head parser and earlier traversal actions.
+- [ ] Refactor the remaining Gen traversal consumer to use the state-threaded
+  theorem.
+- [ ] Delete `mem_runParser_bind_iff_eq_bind_mem_runParser`.
 
-- [ ] Replace `runParser_map` with a theorem.
+### 2. Remove The Sup/Choice Axiom
 
-- [ ] Replace `runParser_pure` with a theorem.
+Live assumption:
 
-- [ ] Replace `mem_runParser_terminal_iff` with a theorem.
-  This List-specific terminal semantics axiom was added as the narrow primitive
-  fact needed to prove `terminal'_sound`.
+- `ParserCombinators/Lemmas.lean`: `runParser_sup_eq_sup_runParser`
 
-- [ ] Replace `mem_runParser_bind_iff_eq_bind_mem_runParser` with a theorem.
-  There are two declarations in the file: an older commented-out statement
-  marked incorrect, and the current list-membership statement used downstream.
-  The current statement should be proved or refined until it is provable.
+Live dependency:
 
-## `ParserCombinators/Memoized.lean`
+- `ParserCombinators/Gen.lean`: `complete_of_sup_right`
 
-- [ ] Prove the relevant laws for the `ParserM` monad instance.
+Required work:
 
-- [ ] Add the constrained-monad/lower-lift theorems noted in the comments:
-  - `lower_preserves_identity`
-  - `lower_preserves_composition`
-  - `isomorphism_lower_lift`
+- [ ] Replace the fresh-state right-choice completeness path with an after-left
+  or lower-state theorem that accounts for the memo state produced by the left
+  branch.
+- [ ] Refactor generated-rule fold completeness to use the state-threaded
+  choice theorem.
+- [ ] Delete `runParser_sup_eq_sup_runParser`.
 
-- [ ] Prove that `ParserM` has the intended `SemilatticeSup` and `OrderBot`
-  structure, or replace the TODO with the exact weaker laws actually needed.
+## Next Proof Step
 
-- [ ] Replace the cache update TODO with an `alter`-based implementation if it
-  still improves the `memoize` code.
+- [x] Finish the exact-counter cache-completeness invariant for generated
+  parsers:
+  `positionMap_complete`, whole-memo union preservation, and the
+  `memoizeStep` compute branch.
+- [ ] Thread that invariant through lower-state generated-parser completeness,
+  then use it to discharge the bind/traverse and sup/choice dependencies above.
 
-- [ ] Prove that `runParser` commutes with the parser combinators.
+## Final Audit
 
-- [ ] Add the extra parser example tests requested by the TODO near
-  `funcParser`.
+```sh
+rg -n "\\baxiom\\b|\\bsorry\\b" ParserCombinators/Gen.lean ParserCombinators/Lemmas.lean ParserCombinators/Memoized.lean ParserCombinators/CFG.lean
+rg -n "\\b(runParser_sup_eq_sup_runParser|mem_runParser_bind_iff_eq_bind_mem_runParser)\\b" ParserCombinators/Gen.lean ParserCombinators/Lemmas.lean
+lake build
+```
 
-- [ ] Implement `memo`.
-
-- [ ] Implement `memo'`.
-
-- [ ] Prove `memo_sound`.
-
-- [ ] Prove `memo_complete`.
+Historical notes or explicitly retired `old_*` statement records are not active
+blockers, but no live proof should depend on retired axiom names.
