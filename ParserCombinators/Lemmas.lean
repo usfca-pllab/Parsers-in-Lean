@@ -32,14 +32,6 @@ theorem memoize_counter_induction
 
 variable (parser₁ parser₂ : ParserM (tag := tag) β μ α) (input : Array β) [DecidableEq α]
 
--- NOTE: This state-insensitive equivalence is too broad for memo-sensitive
--- parsers.  `Parser.orElse` runs the right parser in the memo state produced by
--- the left parser, not from `startState`.  Prefer the proved state-aware
--- `parser_orElse_fst_eq_unionSup` / `mem_parser_orElse_iff` facts below and
--- remove this axiom once downstream proofs stop using it.
-axiom runParser_sup_eq_sup_runParser
-  : ∀ start : ℕ, (runParser (parser₁ ⊔ parser₂) input start).1.EquivQuot ((runParser parser₁ input start).1 ⊔ (runParser parser₂ input start).1)
-
 omit [Fintype τ] [Traversable μ] [DecidableEq α] in
 theorem parser_map_fst_eq
   [DecidableEq α']
@@ -3177,36 +3169,6 @@ theorem mem_runParser_terminal_iff
     rw [prod_fst_bifunctor_snd]
     rw [readerT_pure_fst]
     simp
-
-/-
--- Incorrect old bind statement:
-def old_mem_runParser_bind_iff_eq_bind_mem_runParser_statement :=
-  [DecidableEq α']
-  (parser₂ : α → ParserM (tag := tag) β μ α')
-  {start end_pos : ℕ}
-  {r : μ α'}
-    : ((runParser (parser₁ >>= parser₂) input start).1[end_pos]? = some r) ↔  -- would be "←"
-  ∃ split : ℕ, ∃ s : μ α, (runParser parser₁ input start).1[split]? = some s ∧
-    (s >>= (fun x => sequence (runParser (parser₂ x) input split).1[end_pos]?)) = r  -- would be "≤ r" instead of = r
--/
-
--- NOTE: This state-insensitive bind view is not coherent for memo-sensitive
--- parsers: the RHS reruns continuations from `startState`, while `Parser.bind`
--- runs them under the memo state produced by the pivot parser and previous
--- continuation actions.  Prefer the proved exact-prefix replacements
--- `mem_lower_bind_iff_exists_action_split_mem` and
--- `mem_runParser_bind_iff_exists_action_split_mem`; remove this axiom once
--- the remaining Gen traversal proofs are restated against that shape.
-axiom mem_runParser_bind_iff_eq_bind_mem_runParser
-  [DecidableEq α']
-  (parser₁ : ParserM (tag := tag) β List α)
-  (parser₂ : α → ParserM (tag := tag) β List α')
-  {start end_pos : ℕ}
-  {r : List α'}
-  {x : α'}
-    : ((runParser (parser₁ >>= parser₂) input start).1[end_pos]? = some r ∧ x ∈ r) ↔
-  ∃ split : ℕ, ∃ s : List α, (runParser parser₁ input start).1[split]? = some s ∧
-  x ∈ s >>= (fun x => (runParser (parser₂ x) input split).1[end_pos]?.toList.flatten)
 
 set_option linter.unusedSectionVars false in
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in

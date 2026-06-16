@@ -37,6 +37,37 @@ When changing proofs:
 - Preserve existing theorem statements unless the surrounding definitions force
   a sharper statement.
 
+## Proof Compactness
+
+The remaining proof work should stay focused on the generated parser and the
+exact-counter memoization argument.  Avoid growing a broad parser algebra
+library unless a live proof obligation genuinely needs it.
+
+- Prefer generated-parser-specific, lower-state, or exact-prefix lemmas over
+  broad fresh-state equivalences for all `ParserM`.
+- Keep `memo_complete` as the central cache-completeness invariant unless a
+  narrower local refinement is forced by a concrete goal.
+- Avoid repetitive proof logic.  If the same unfolding, split, or map/union
+  transport appears several times, introduce one small named helper at the
+  semantic boundary and use it directly.
+- Avoid excessive inlining of `gen'`, `memoizeStep`, `Parser.bind`, and
+  `Parser.orElse` in large proofs.  Name the small fact needed from the
+  definition instead of replaying the implementation structure at each call
+  site.
+- Do not create parallel theorem families that differ only by restating the
+  same proof under slightly different wrappers.  Prefer one stronger local
+  statement that matches the live generated-parser proof path, then instantiate
+  it at the public theorem boundary.
+- Keep proof edits proportional to the remaining goal.  When a proof starts to
+  require repeated tactical blocks, stop and factor the recurring semantic fact
+  into a named lemma instead of copying the block.
+- Do not preserve stale helper paths just to keep old names alive.  Once a
+  compact lower-state replacement exists, delete or stop using fresh-state
+  helpers that encode the wrong abstraction.
+- New helper lemmas should either remove real duplication, expose a reusable
+  implementation fact, or discharge a live downstream proof.  Otherwise keep
+  the proof local.
+
 ## Memoization Priority
 
 The key contribution of this project is verified memoization, so changes to
@@ -99,10 +130,15 @@ Use the repo-local skill at
 
 - `Lemmas.lean` still contains broad axioms for parser union and bind behavior.
   Each has a narrower state-aware replacement path under construction.
+- The active proof path is to thread the existing exact-counter
+  `memo_complete` invariant through one lower-state generated-parser
+  completeness theorem, instantiate it at `startState` with
+  `memo_complete_empty`, and then retire the stale fresh-state traversal and
+  choice helpers.
 - `Gen.gen_sound` no longer depends on the broad `memoize_induction` axiom; it
   now uses `memoize_counter_induction` plus a start-state memoize exposure
-  lemma.  It still depends indirectly on state-insensitive sup/bind helper
-  lemmas, which are the next major proof targets.
+  lemma.  The remaining active axiom dependencies are the state-insensitive
+  bind/traverse and sup/choice helper paths.
 - `Memoized.memo` and `Memoized.memo'` are thin homogeneous wrappers around the
   implemented finite-counter `memoize`.  Fuel/subsumption correctness for those
   wrappers remains future proof work rather than an active placeholder theorem.

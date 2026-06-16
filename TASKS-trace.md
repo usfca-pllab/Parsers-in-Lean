@@ -31,14 +31,13 @@ why particular helper layers were added, replaced, or retired.
 Current audit snapshot for the active file:
 
 ```text
-ParserCombinators/Lemmas.lean:40:axiom runParser_sup_eq_sup_runParser
-ParserCombinators/Lemmas.lean:3200:axiom mem_runParser_bind_iff_eq_bind_mem_runParser
-ParserCombinators/Gen.lean:2473 uses mem_runParser_bind_iff_eq_bind_mem_runParser
-ParserCombinators/Gen.lean:6891 uses runParser_sup_eq_sup_runParser
+No matches:
+rg -n "\\baxiom\\b|\\bsorry\\b" ParserCombinators/Gen.lean ParserCombinators/Lemmas.lean ParserCombinators/Memoized.lean ParserCombinators/CFG.lean
+rg -n "\\b(runParser_sup_eq_sup_runParser|mem_runParser_bind_iff_eq_bind_mem_runParser)\\b" ParserCombinators/Gen.lean ParserCombinators/Lemmas.lean
 ```
 
-Line numbers are only a trace snapshot; rerun the audit command in `TASKS.md`
-before acting on them.
+`lake build` succeeds after the axiom declarations and stale helper paths were
+removed.
 
 Latest verified replacement-layer progress:
 
@@ -64,6 +63,122 @@ Latest verified replacement-layer progress:
   `memo_complete_memoizeStep_compute`, and `memo_complete_memoizeStep`.
   This proves that `memoizeStep` preserves the generated-parser
   cache-completeness invariant through both cache-hit and compute branches.
+- Added the lower-state exact-counter cache-completeness bridge:
+  `lower_memo_complete`, `lower_map_memo_complete`,
+  `lower_memo_complete_memoizeStep_lift`, `lower_failure_memo_complete`, and
+  `lower_memo_complete_memoize`.  This threads `memo_complete` through
+  `ParserM.lower` for result maps and the implemented `memoize` wrapper
+  without unfolding the generated parser or replacing memoization with
+  recomputation.
+- Added the lower-state generated-rule insertion bridge:
+  `generatedSymbolParser`, `generatedRuleParser`,
+  `lower_rule_branch_complete`, `lower_complete_of_foldl_sup_mem_split`, and
+  `lower_gen'_rule_complete_after_split`, plus the small split adapters
+  `list_split_of_mem` and `generatedRuleParser_split_of_rule_mem`.  These
+  expose the facts needed to replace the stale fresh-state `gen'_rule_complete`
+  path: prove one rule branch under the memo state produced by earlier rule
+  branches, then insert it into the generated `foldl` using the existing
+  after-left choice semantics.
+- Added the `memo_complete` state-preservation fold layer:
+  `joinUnderCache_memo_complete`,
+  `traversable_foldl_joinUnderCache_memo_complete`,
+  `list_foldl_traversable_joinUnderCache_memo_complete`, and
+  `lower_return_bind_cons_memo_complete`.  These provide the missing invariant
+  for constructive traversal completeness: earlier result actions can run
+  before the selected parse result without destroying exact-counter cache
+  completeness.
+- Extended that state-preservation layer through bind:
+  `bindContinue_memo_complete`, `parser_bind_memo_complete`,
+  `lower_bind_constructor_memo_complete`, and `lower_lift_memo_complete`.
+  These are the cache-completeness analogs of the existing memo-well-formedness
+  bind lemmas and give corrected traversal proofs a compact way to thread
+  `memo_complete` through `Parser.bind` and lifted parser primitives.
+- Extended exact-counter cache-completeness preservation through choice and
+  generated-rule folds with `parser_pure_memo_complete`,
+  `parser_orElse_memo_complete`, `lower_sup_memo_complete`, and
+  `lower_memo_complete_of_foldl_sup`.  These are the prefix-state invariants
+  needed to use `lower_gen'_rule_complete_after_split` after earlier generated
+  rule branches have executed.
+- Added generated-rule and `gen'` fold cache-completeness bridges:
+  `lower_rule_branch_memo_complete_of_traverse` and
+  `lower_gen'_memo_complete_of_rules`.  These isolate the remaining missing
+  obligation for the lower-state completeness proof to generated child
+  traversal, rather than the whole generated parser fold.
+- Added generated child traversal cache-completeness preservation:
+  `lower_memo_complete_traverse_cons_terminal`,
+  `lower_memo_complete_traverse_cons_lift`,
+  `lower_memo_complete_traverse_cons_failure`,
+  `lower_memo_complete_traverse_cons_memoize`, and
+  `lower_memo_complete_generated_traverse_memoize`.  This closes the
+  state-preservation side for generated child traversal; the remaining
+  generated-traversal work is direct membership/completeness under
+  `memo_complete`.
+- Added bind-prefix cache-completeness helpers:
+  `bind_action_prefix_memo_complete` and
+  `mem_lower_bind_exists_action_split_complete`.  These are the
+  `memo_complete` analogs of the existing well-formedness prefix/decomposition
+  lemmas and expose the exact threaded memo state needed by lower-state
+  traversal completeness without using the stale fresh-state bind axiom.
+- Added direct generated child traversal membership under exact-counter cache
+  completeness:
+  `lower_traverse_complete_cons_lift_of_head_tail_complete` and
+  `lower_generated_traverse_complete_of_admissible_valid_pairs`.  This proves
+  admissible generated child forests are produced by the generated traversal
+  under any `memo_complete` memo state, using terminal construction and the
+  actual memoized nonterminal head path instead of the stale fresh-state
+  `GeneratedChildWitness` route.
+- Added the lower-state generated-rule fold bridge
+  `lower_gen'_complete_of_admissible_rule`.  It selects the concrete CFG rule
+  inside the generated `gen'` fold, proves its child traversal under the memo
+  state produced by earlier rule branches, and inserts the branch with
+  `lower_gen'_rule_complete_after_split`.
+- Added exact-counter key lookup facts:
+  `counter_getElem?_eq_of_toKey_eq` and `counter_getD_eq_of_toKey_eq`.  These
+  turn equality of executable counter keys into usable lookup/default lookup
+  equalities, which is needed by the recursive completeness rewrite when
+  discharging `resultMap_complete` obligations for cached body results.
+- Extended the exact-counter key-transfer layer with
+  `counter_dec_getElem?_eq_of_getElem?_eq`,
+  `admissibleTreeWith_congr_counter_getElem?`, and
+  `admissibleForestWith_congr_counter_getElem?`.  These transfer admissibility
+  across counters with identical executable lookups and through one `dec`,
+  which is the core coherence fact needed when a cached `Counter.toKey` is
+  re-instantiated by `resultMap_complete`.
+- Added `resultMap_complete_lower_gen'_memoized_body`, a generated-parser
+  specific compute-body bridge.  It converts an admissible nonterminal tree at
+  the parent exact-counter key into membership in the `gen'` body run under the
+  decremented counter, using the lower-state rule-fold completeness theorem.
+  This names the key semantic boundary needed by the recursive completeness
+  induction instead of inlining rule selection and counter-key transfer at each
+  cache insertion site.
+- Ran the theorem-adjustment review for the `memo_complete` generated
+  traversal/rule-fold helpers and refined their `memoizeStep` preservation
+  premise from unguarded to guarded by `counter[n]? ≠ some 0`.  The review
+  confirmed this matches executable `memoize`, which runs `memoizeStep` only in
+  the nonzero counter branch, and avoids a proof obligation for zero-counter
+  `memoizeStep` runs that the implementation never performs.  Updated
+  `lower_memo_complete_traverse_cons_memoize`,
+  `lower_memo_complete_generated_traverse_memoize`,
+  `lower_generated_traverse_complete_of_admissible_valid_pairs`,
+  `lower_gen'_complete_of_admissible_rule`, and
+  `resultMap_complete_lower_gen'_memoized_body` in place rather than adding a
+  duplicate guarded theorem family.
+- Added `memoized_gen_complete_invariant`, the recursive exact-counter
+  completeness invariant for generated parsers.  It carries lower-state
+  `memo_complete` preservation, guarded compute-branch `resultMap_complete`,
+  and admissible-tree membership for the current memoized parser.
+- Rewired `gen_complete_exists_of_admissible_valid_tree` to instantiate that
+  invariant at `startState` with `memo_complete_empty`, so public
+  `gen_complete` and `gen_correct` build through the real exact-counter
+  `memoize` implementation.
+- Deleted the stale fresh-state runParser completeness route:
+  `runParser_map_complete`, `runParser_traverse_complete_cons`,
+  `TraverseCompleteWitness`, `GeneratedChildWitness`, the witness conversion
+  helpers, the old `complete_of_sup_right` / fold helpers, and the old
+  arbitrary-counter `gen_complete_of_admissible_tree_span` route.
+- Removed the now-unused axiom declarations
+  `runParser_sup_eq_sup_runParser` and
+  `mem_runParser_bind_iff_eq_bind_mem_runParser` from `Lemmas.lean`.
 - `lake build` succeeds after these additions.
 
 Latest theorem-contract review and cleanup:

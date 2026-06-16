@@ -80,6 +80,22 @@ abbrev generatedListSymbolParser
   | Symbol.term a => Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a
   | Symbol.nonterm n => memoize counter g n
 
+abbrev generatedSymbolParser
+  (cfg : @CFG α ν)
+  (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg)) :
+    Symbol α ν → ParserM (tag := tag cfg) α List (ParseTree cfg)
+  | Symbol.term a => Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a
+  | Symbol.nonterm n => recur n
+
+abbrev generatedRuleParser
+  (cfg : @CFG α ν)
+  (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  (n : ν)
+  (rule : {rule // rule ∈ cfg.rules n}) :
+    ParserM (tag := tag cfg) α List (ParseTree cfg) :=
+  Node n rule <$>
+    List.traverse id (rule.val.map (generatedSymbolParser cfg recur))
+
 abbrev cachedResultMap (cfg : @CFG α ν)
   (memo : MemoData (tag cfg) List)
   (n : ν) (key : MemoKey ν) (start : ℕ) :
@@ -1226,7 +1242,8 @@ theorem traversable_foldl_joinUnderCache_memo_wellFormed
   induction actions generalizing acc with
   | nil =>
       intro memo h_memo
-      simpa [traversable_foldl_nil] using h_acc memo h_memo
+      change memo_wellFormed cfg input ((acc memo input).2.val)
+      exact h_acc memo h_memo
   | cons action actions ih =>
       intro memo h_memo
       rw [traversable_foldl_cons]
@@ -1269,7 +1286,8 @@ theorem list_foldl_traversable_joinUnderCache_memo_wellFormed
   induction groups generalizing acc with
   | nil =>
       intro memo h_memo
-      simpa using h_acc memo h_memo
+      change memo_wellFormed cfg input ((acc memo input).2.val)
+      exact h_acc memo h_memo
   | cons group groups ih =>
       intro memo h_memo
       simp only [List.foldl_cons]
@@ -2424,78 +2442,6 @@ lemma not_mem_bind_cons_map_nil
     (y := ([] : List γ)) h_mapped_getD
   cases h_eq
 
-omit [Fintype ν] in
-lemma runParser_map_complete
-  {cfg : @CFG α ν}
-  {γ δ : Type u} [DecidableEq γ] [DecidableEq δ]
-  {p : ParserM (tag := tag cfg) α List γ}
-  {f : γ → δ}
-  {input : Array α} {start end_ : ℕ} {x : γ}
-  (h : x ∈ (runParser (tag := tag cfg) p input start).1.getD end_ [])
-  : f x ∈ (runParser (tag := tag cfg) (f <$> p) input start).1.getD end_ [] := by
-  exact mem_runParser_map_of_mem
-    (tag := tag cfg) (β := α)
-    p f input start end_ x h
-
-omit [Fintype ν] in
-lemma runParser_traverse_complete_cons
-  {cfg : @CFG α ν}
-  {γ : Type u} [DecidableEq γ]
-  {head : ParserM (tag := tag cfg) α List γ}
-  {tail : List (ParserM (tag := tag cfg) α List γ)}
-  {input : Array α} {start split end_ : ℕ}
-  {x : γ} {xs : List γ}
-  (h_head : x ∈ (runParser (tag := tag cfg) head input start).1.getD split [])
-  (h_tail : xs ∈ (runParser (tag := tag cfg) (List.traverse id tail) input split).1.getD end_ [])
-  : x :: xs ∈
-      (runParser (tag := tag cfg) (List.traverse id (head :: tail)) input start).1.getD end_ [] := by
-  have h_tail_getD := h_tail
-  rw [List.traverse, seq_eq_bind]
-  simp
-  rw [Std.HashMap.getD_eq_getD_getElem?] at h_head h_tail
-  cases h_head_opt : (runParser (tag := tag cfg) head input start).1[split]? with
-  | none =>
-      simp [h_head_opt] at h_head
-  | some headResults =>
-      simp [h_head_opt] at h_head
-      cases h_tail_opt :
-          (runParser (tag := tag cfg) (List.traverse id tail) input split).1[end_]? with
-      | none =>
-          simp [h_tail_opt] at h_tail
-      | some tailResults =>
-          simp [h_tail_opt] at h_tail
-          let resultMap := (runParser (tag := tag cfg)
-            (head >>= fun a => List.cons a <$> List.traverse id tail)
-            input start).1
-          let r := resultMap.getD end_ []
-          have h_bind :
-              resultMap[end_]? = some r ∧ x :: xs ∈ r := by
-            apply (mem_runParser_bind_iff_eq_bind_mem_runParser input head
-              (fun (a : γ) => List.cons a <$> List.traverse id tail)
-              (x := x :: xs) (r := r) (start := start) (end_pos := end_)).mpr
-            refine ⟨split, headResults, h_head_opt, ?_⟩
-            have h_mapped_getD :
-                x :: xs ∈
-                  (runParser (tag := tag cfg)
-                    (List.cons x <$> List.traverse id tail)
-                    input split).1.getD end_ [] := by
-              exact mem_runParser_map_of_mem
-                (tag := tag cfg) (β := α)
-                (List.traverse id tail)
-                (List.cons x) input split end_ xs h_tail_getD
-            have h_mapped_mem :
-                x :: xs ∈
-                  (runParser (tag := tag cfg)
-                    (List.cons x <$> List.traverse id tail)
-                    input split).1[end_]?.toList.flatten := by
-              exact mem_resultMap_getElem?_toList_flatten_of_mem_getD
-                ((runParser (tag := tag cfg)
-                  (List.cons x <$> List.traverse id tail) input split).1)
-                h_mapped_getD
-            rw [List.bind_eq_flatMap]
-            exact List.mem_flatMap.mpr ⟨x, h_head, h_mapped_mem⟩
-          simpa [resultMap, r] using h_bind.2
-
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma valid_node_terminal_child
   {cfg : @CFG α ν}
@@ -2892,6 +2838,577 @@ abbrev memo_complete (cfg : @CFG α ν) (input : Array α)
     tree.Valid →
     input.toList = pre ++ tree.leaves ++ post →
     tree ∈ resultMap.getD (pre.length + tree.leaves.length) []
+
+abbrev lower_memo_complete (cfg : @CFG α ν)
+  {γ : Type u} [DecidableEq γ]
+  (p : ParserM (tag := tag cfg) α List γ) (input : Array α)
+  :=
+  ∀ memo : MemoData (tag cfg) List,
+  memo_complete cfg input memo →
+  ∀ start : ℕ,
+    memo_complete cfg input (((p.lower start) memo input).2.val)
+
+omit [Fintype ν] in
+theorem lower_map_memo_complete
+  {cfg : @CFG α ν} {γ δ : Type u} [DecidableEq γ] [DecidableEq δ]
+  {p : ParserM (tag := tag cfg) α List γ} {f : γ → δ}
+  {input : Array α}
+  (h : lower_memo_complete cfg p input) :
+    lower_memo_complete cfg (f <$> p) input := by
+  intro memo h_memo start
+  rw [lower_map_snd_val_eq
+    (tag := tag cfg) (β := α)
+    (p := p) (f := f)
+    (memo := memo) (input := input) (start := start)]
+  exact h memo h_memo start
+
+omit [Fintype ν] in
+theorem joinUnderCache_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (acc act :
+    MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
+      (ResultMap List γ))
+  (h_acc :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input ((acc memo input).2.val))
+  (h_act :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input ((act memo input).2.val)) :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input ((joinUnderCache acc act memo input).2.val) := by
+  intro memo h_memo
+  rw [joinUnderCache_snd_eq]
+  exact h_act _ (h_acc memo h_memo)
+
+omit [Fintype ν] in
+theorem traversable_foldl_joinUnderCache_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (actions :
+    List (MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
+      (ResultMap List γ)))
+  (acc :
+    MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
+      (ResultMap List γ))
+  (h_acc :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input ((acc memo input).2.val))
+  (h_actions :
+    ∀ action ∈ actions,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input ((action memo input).2.val)) :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input
+        (((Traversable.foldl joinUnderCache acc actions) memo input).2.val) := by
+  induction actions generalizing acc with
+  | nil =>
+      intro memo h_memo
+      rw [traversable_foldl_nil]
+      intro n counter pre post seen tree resultMap h_cache h_root h_adm
+        h_valid h_input
+      exact (h_acc memo h_memo) h_cache h_root h_adm h_valid h_input
+  | cons action actions ih =>
+      intro memo h_memo
+      rw [traversable_foldl_cons]
+      exact ih
+        (acc := joinUnderCache acc action)
+        (by
+          exact joinUnderCache_memo_complete
+            (cfg := cfg) (input := input)
+            (acc := acc) (act := action)
+            h_acc
+            (fun memo h_memo => h_actions action (by simp) memo h_memo))
+        (fun action' h_action' memo h_memo =>
+          h_actions action' (by simp [h_action']) memo h_memo)
+        memo h_memo
+
+omit [Fintype ν] in
+theorem list_foldl_traversable_joinUnderCache_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (groups :
+    List (List (MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
+      (ResultMap List γ))))
+  (acc :
+    MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
+      (ResultMap List γ))
+  (h_acc :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input ((acc memo input).2.val))
+  (h_groups :
+    ∀ group ∈ groups, ∀ action ∈ group,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input ((action memo input).2.val)) :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input
+        (((List.foldl (Traversable.foldl joinUnderCache) acc groups)
+          memo input).2.val) := by
+  induction groups generalizing acc with
+  | nil =>
+      intro memo h_memo
+      simp only [List.foldl_nil]
+      intro n counter pre post seen tree resultMap h_cache h_root h_adm
+        h_valid h_input
+      exact (h_acc memo h_memo) h_cache h_root h_adm h_valid h_input
+  | cons group groups ih =>
+      intro memo h_memo
+      simp only [List.foldl_cons]
+      exact ih
+        (acc := Traversable.foldl joinUnderCache acc group)
+        (by
+          exact traversable_foldl_joinUnderCache_memo_complete
+            (cfg := cfg) (input := input)
+            (actions := group) (acc := acc)
+            h_acc
+            (fun action h_action memo h_memo =>
+              h_groups group (by simp) action h_action memo h_memo))
+        (fun group' h_group' action h_action memo h_memo =>
+          h_groups group' (by simp [h_group']) action h_action memo h_memo)
+        memo h_memo
+
+omit [Fintype ν] in
+theorem bindContinue_memo_complete
+  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (resultMap : ResultMap List δ)
+  (f : δ → Parser (tag := tag cfg) α List γ)
+  (h_f :
+    ∀ a start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((f a start) memo input).2.val)) :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      memo_complete cfg input
+        ((Parser.bindContinue (tag := tag cfg) (β := α)
+          resultMap f memo input).2.val) := by
+  unfold Parser.bindContinue Parser.bindActions
+  exact list_foldl_traversable_joinUnderCache_memo_complete
+    (cfg := cfg) (input := input)
+    (groups := resultMap.toList.map
+      (fun pair : ℕ × List δ =>
+        match pair with
+        | (j, values) => List.map (fun a => f a j) values))
+    (acc := pure Std.HashMap.emptyWithCapacity)
+    (by
+      intro memo h_memo
+      simp [Pure.pure, ReaderT.pure]
+      intro n counter pre post seen tree resultMap h_cache h_root h_adm
+        h_valid h_input
+      exact h_memo h_cache h_root h_adm h_valid h_input)
+    (by
+      intro group h_group action h_action memo h_memo
+      rw [List.mem_map] at h_group
+      rcases h_group with ⟨pair, _h_pair, rfl⟩
+      rcases pair with ⟨j, values⟩
+      simp at h_action
+      rcases h_action with ⟨a, _h_a, rfl⟩
+      exact h_f a j memo h_memo)
+
+omit [Fintype ν] in
+theorem parser_bind_memo_complete
+  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p : Parser (tag := tag cfg) α List δ)
+  (f : δ → Parser (tag := tag cfg) α List γ)
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_f :
+    ∀ a start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((f a start) memo input).2.val)) :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((Parser.bind p f start) memo input).2.val) := by
+  intro start memo h_memo
+  rw [parser_bind_snd_val_eq_bindRun
+    (tag := tag cfg) (β := α)
+    (p := p) (f := f)
+    (memo := memo) (input := input) (start := start)]
+  rw [bindRun_snd_eq_bindContinue
+    (tag := tag cfg) (β := α)
+    (p := p) (f := f)
+    (memo := memo) (input := input) (start := start)]
+  exact bindContinue_memo_complete
+    (cfg := cfg) (input := input)
+    (resultMap := ((p start) memo input).1)
+    (f := f)
+    h_f
+    (↑((p start) memo input).2)
+    (h_p start memo h_memo)
+
+omit [Fintype ν] in
+theorem lower_bind_constructor_memo_complete
+  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p : Parser (tag := tag cfg) α List δ)
+  (k : δ → ParserM (tag := tag cfg) α List γ)
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_k :
+    ∀ a, lower_memo_complete cfg (k a) input) :
+    lower_memo_complete cfg (ParserM.Bind p k) input := by
+  intro memo h_memo start
+  change memo_complete cfg input
+    (((Parser.bind p (fun a => (k a).lower) start) memo input).2.val)
+  exact parser_bind_memo_complete
+    (cfg := cfg) (input := input)
+    (p := p) (f := fun a => (k a).lower)
+    h_p
+    (fun a start memo h_memo => h_k a memo h_memo start)
+    start memo h_memo
+
+omit [Fintype ν] in
+theorem lower_lift_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p : Parser (tag := tag cfg) α List γ)
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val)) :
+    lower_memo_complete cfg (ParserM.lift p) input := by
+  unfold ParserM.lift
+  exact lower_bind_constructor_memo_complete
+    (cfg := cfg) (input := input)
+    (p := p) (k := fun a =>
+      ParserM.Return (tag := tag cfg) (β := α) (μ := List) a)
+    h_p
+    (by
+      intro a memo h_memo start
+      rw [lower_return_snd_val_eq
+        (tag := tag cfg) (β := α)
+        (a := a) (memo := memo) (input := input) (start := start)]
+      exact h_memo)
+
+omit [Fintype ν] in
+theorem bind_action_prefix_memo_complete
+  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p : Parser (tag := tag cfg) α List δ)
+  (k : δ → ParserM (tag := tag cfg) α List γ)
+  (prePairs : List (ℕ × List δ)) (preValues : List δ)
+  (split start : ℕ) {memo : MemoData (tag cfg) List}
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_k : ∀ a, lower_memo_complete cfg (k a) input)
+  (h_memo : memo_complete cfg input memo) :
+    memo_complete cfg input
+      (((Traversable.foldl joinUnderCache
+        (List.foldl (Traversable.foldl joinUnderCache)
+          (pure Std.HashMap.emptyWithCapacity)
+          (List.map
+            (fun pair : ℕ × List δ =>
+              match pair with
+              | (j, values) => List.map (fun a => (k a).lower j) values)
+            prePairs))
+        (List.map (fun a => (k a).lower split) preValues))
+        (↑((p start) memo input).2) input).2.val) := by
+  let pairAction :
+      ℕ × List δ →
+        List (MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
+          (ResultMap List γ)) :=
+    fun pair =>
+      match pair with
+      | (j, values) => List.map (fun a => (k a).lower j) values
+  have h_after_p : memo_complete cfg input ((p start memo input).2.val) :=
+    h_p start memo h_memo
+  have h_tail_prefix :
+      ∀ action ∈ List.map (fun a => (k a).lower split) preValues,
+        ∀ memo : MemoData (tag cfg) List,
+          memo_complete cfg input memo →
+          memo_complete cfg input ((action memo input).2.val) := by
+    intro action h_action memo h_memo
+    rw [List.mem_map] at h_action
+    rcases h_action with ⟨a, _h_a, rfl⟩
+    exact h_k a memo h_memo split
+  change memo_complete cfg input
+    (((Traversable.foldl joinUnderCache
+      (List.foldl (Traversable.foldl joinUnderCache)
+        (pure Std.HashMap.emptyWithCapacity)
+        (List.map pairAction prePairs))
+      (List.map (fun a => (k a).lower split) preValues))
+      (↑((p start) memo input).2) input).2.val)
+  exact traversable_foldl_joinUnderCache_memo_complete
+    (cfg := cfg) (input := input)
+    (actions := List.map (fun a => (k a).lower split) preValues)
+    (acc := List.foldl (Traversable.foldl joinUnderCache)
+      (pure Std.HashMap.emptyWithCapacity)
+      (List.map pairAction prePairs))
+    (by
+      intro memo' h_memo'
+      exact list_foldl_traversable_joinUnderCache_memo_complete
+        (cfg := cfg) (input := input)
+        (groups := List.map pairAction prePairs)
+        (acc := pure Std.HashMap.emptyWithCapacity)
+        (by
+          intro memo h_memo
+          simp [Pure.pure, ReaderT.pure]
+          intro n counter pre post seen tree resultMap h_cache h_root h_adm
+            h_valid h_input
+          exact h_memo h_cache h_root h_adm h_valid h_input)
+        (by
+          intro group h_group action h_action memo h_memo
+          rw [List.mem_map] at h_group
+          rcases h_group with ⟨pair, _h_pair, rfl⟩
+          rcases pair with ⟨j, values⟩
+          simp [pairAction] at h_action
+          rcases h_action with ⟨a, _h_a, rfl⟩
+          exact h_k a memo h_memo j)
+        memo' h_memo')
+    h_tail_prefix
+    (↑((p start) memo input).2)
+    h_after_p
+
+omit [Fintype ν] in
+theorem mem_lower_bind_exists_action_split_complete
+  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p : Parser (tag := tag cfg) α List δ)
+  (k : δ → ParserM (tag := tag cfg) α List γ)
+  {memo : MemoData (tag cfg) List} {start end_ : ℕ} {x : γ}
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_k : ∀ a, lower_memo_complete cfg (k a) input)
+  (h_memo : memo_complete cfg input memo)
+  (h :
+    x ∈ (((ParserM.Bind p k).lower start) memo input).1.getD end_ []) :
+    ∃ split a memoPrefix,
+      memo_complete cfg input memoPrefix ∧
+      x ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
+  obtain ⟨prePairs, _postPairs, split, _values, preValues, _postValues, a,
+    _h_toList, _h_values, h_action⟩ :=
+    mem_lower_bind_exists_action_split_mem
+      (tag := tag cfg) (β := α)
+      (p := p) (k := k)
+      (memo := memo) (input := input)
+      (start := start) (end_pos := end_) (x := x) h
+  let memoPrefix : MemoData (tag cfg) List :=
+    ((Traversable.foldl joinUnderCache
+      (List.foldl (Traversable.foldl joinUnderCache)
+        (pure Std.HashMap.emptyWithCapacity)
+        (List.map
+          (fun pair : ℕ × List δ =>
+            match pair with
+              | (j, values) => List.map (fun a => (k a).lower j) values)
+          prePairs))
+      (List.map (fun a => (k a).lower split) preValues))
+      (↑((p start) memo input).2) input).2.val
+  have h_prefix :
+      memo_complete cfg input memoPrefix := by
+    intro n counter pre post seen tree resultMap h_cache h_root h_adm
+      h_valid h_input
+    exact
+      (bind_action_prefix_memo_complete
+        (cfg := cfg) (input := input)
+        (p := p) (k := k)
+        (prePairs := prePairs) (preValues := preValues)
+        (split := split) (start := start)
+        (memo := memo) (h_p := h_p) (h_k := h_k) (h_memo := h_memo))
+        (by simpa [memoPrefix] using h_cache)
+        h_root h_adm h_valid h_input
+  have h_action' :
+      x ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
+    simpa [memoPrefix] using h_action
+  exact ⟨split, a, memoPrefix, h_prefix, h_action'⟩
+
+omit [Fintype ν] in
+theorem parser_pure_memo_complete
+  {cfg : @CFG α ν} {γ : Type u}
+  {input : Array α} (x : γ) :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((Pure.pure x : Parser (tag := tag cfg) α List γ) start)
+            memo input).2.val := by
+  intro start memo h_memo
+  simp [Pure.pure, ReaderT.pure]
+  intro n counter pre post seen tree resultMap h_cache h_root h_adm
+    h_valid h_input
+  exact h_memo h_cache h_root h_adm h_valid h_input
+
+omit [Fintype ν] in
+theorem parser_orElse_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p q : Parser (tag := tag cfg) α List γ)
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_q :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((q start) memo input).2.val)) :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((Parser.orElse p q start) memo input).2.val) := by
+  intro start memo h_memo
+  unfold Parser.orElse
+  exact joinUnderCache_memo_complete
+    (cfg := cfg) (input := input)
+    (acc := p start) (act := q start)
+    (fun memo h_memo => h_p start memo h_memo)
+    (fun memo h_memo => h_q start memo h_memo)
+    memo h_memo
+
+omit [Fintype ν] in
+theorem lower_sup_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (p q : ParserM (tag := tag cfg) α List γ)
+  (h_p : lower_memo_complete cfg p input)
+  (h_q : lower_memo_complete cfg q input) :
+    lower_memo_complete cfg (p ⊔ q) input := by
+  cases p with
+  | Return x =>
+      cases q with
+      | Return y =>
+          change lower_memo_complete cfg
+            (ParserM.Bind
+              (Parser.orElse
+                (Pure.pure x : Parser (tag := tag cfg) α List γ)
+                (Pure.pure y : Parser (tag := tag cfg) α List γ))
+              (ParserM.Return (tag := tag cfg) (β := α) (μ := List)))
+            input
+          exact lower_bind_constructor_memo_complete
+            (cfg := cfg) (input := input)
+            (p := Parser.orElse
+              (Pure.pure x : Parser (tag := tag cfg) α List γ)
+              (Pure.pure y : Parser (tag := tag cfg) α List γ))
+            (k := ParserM.Return (tag := tag cfg) (β := α) (μ := List))
+            (parser_orElse_memo_complete
+              (cfg := cfg) (input := input)
+              (p := Pure.pure x)
+              (q := Pure.pure y)
+              (parser_pure_memo_complete (cfg := cfg) (input := input) x)
+              (parser_pure_memo_complete (cfg := cfg) (input := input) y))
+            (by
+              intro a memo h_memo start
+              rw [lower_return_snd_val_eq
+                (tag := tag cfg) (β := α)
+                (a := a) (memo := memo) (input := input) (start := start)]
+              exact h_memo)
+      | Bind q kq =>
+          change lower_memo_complete cfg
+            (ParserM.lift
+              (Parser.orElse
+                (Pure.pure x : Parser (tag := tag cfg) α List γ)
+                (Parser.bind q (fun a => (kq a).lower))))
+            input
+          exact lower_lift_memo_complete
+            (cfg := cfg) (input := input)
+            (p := Parser.orElse
+              (Pure.pure x : Parser (tag := tag cfg) α List γ)
+              (Parser.bind q (fun a => (kq a).lower)))
+            (parser_orElse_memo_complete
+              (cfg := cfg) (input := input)
+              (p := Pure.pure x)
+              (q := Parser.bind q (fun a => (kq a).lower))
+              (parser_pure_memo_complete (cfg := cfg) (input := input) x)
+              (by
+                intro start memo h_memo
+                exact h_q memo h_memo start))
+  | Bind p kp =>
+      cases q with
+      | Return y =>
+          change lower_memo_complete cfg
+            (ParserM.lift
+              (Parser.orElse
+                (Parser.bind p (fun a => (kp a).lower))
+                (Pure.pure y : Parser (tag := tag cfg) α List γ)))
+            input
+          exact lower_lift_memo_complete
+            (cfg := cfg) (input := input)
+            (p := Parser.orElse
+              (Parser.bind p (fun a => (kp a).lower))
+              (Pure.pure y : Parser (tag := tag cfg) α List γ))
+            (parser_orElse_memo_complete
+              (cfg := cfg) (input := input)
+              (p := Parser.bind p (fun a => (kp a).lower))
+              (q := Pure.pure y)
+              (by
+                intro start memo h_memo
+                exact h_p memo h_memo start)
+              (parser_pure_memo_complete (cfg := cfg) (input := input) y))
+      | Bind q kq =>
+          change lower_memo_complete cfg
+            (ParserM.lift
+              (Parser.orElse
+                (Parser.bind p (fun a => (kp a).lower))
+                (Parser.bind q (fun a => (kq a).lower))))
+            input
+          exact lower_lift_memo_complete
+            (cfg := cfg) (input := input)
+            (p := Parser.orElse
+              (Parser.bind p (fun a => (kp a).lower))
+              (Parser.bind q (fun a => (kq a).lower)))
+            (parser_orElse_memo_complete
+              (cfg := cfg) (input := input)
+              (p := Parser.bind p (fun a => (kp a).lower))
+              (q := Parser.bind q (fun a => (kq a).lower))
+              (by
+                intro start memo h_memo
+                exact h_p memo h_memo start)
+              (by
+                intro start memo h_memo
+                exact h_q memo h_memo start))
+
+omit [Fintype ν] in
+theorem lower_memo_complete_of_foldl_sup
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {input : Array α}
+  (parsers : List (ParserM (tag := tag cfg) α List γ))
+  (acc : ParserM (tag := tag cfg) α List γ)
+  (h_acc : lower_memo_complete cfg acc input)
+  (h_parsers : ∀ p ∈ parsers, lower_memo_complete cfg p input) :
+    lower_memo_complete cfg
+      (parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
+      input := by
+  induction parsers generalizing acc with
+  | nil =>
+      simpa using h_acc
+  | cons head tail ih =>
+      simp [List.foldl]
+      exact ih
+        (acc := acc ⊔ head)
+        (lower_sup_memo_complete
+          (cfg := cfg) (input := input)
+          acc head h_acc (h_parsers head (by simp)))
+        (by
+          intro p h_p
+          exact h_parsers p (by simp [h_p]))
 
 omit [BEq α] [DecidableEq α] [Monad μ] [SemilatticeAlt μ] [Traversable μ]
   [Fintype ν] in
@@ -3676,6 +4193,40 @@ theorem memo_complete_memoizeStep
         h_adm h_valid h_input
       exact h_complete h_cache h_root h_adm h_valid h_input
 
+set_option linter.unusedSectionVars false in
+theorem lower_memo_complete_memoizeStep_lift
+  {cfg : @CFG α ν} {input : Array α}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  (next : ℕ → (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  {n : ν}
+  (h_compute :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      ∀ start : ℕ,
+      ∀ _h_no_cache :
+        (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+        memo_complete cfg input
+            ((((g (next (input.size - start + 1)) n).lower start)
+              memo input).2.val) ∧
+          resultMap_complete cfg input n (Counter.toKey counter) start
+            ((((g (next (input.size - start + 1)) n).lower start)
+              memo input).1)) :
+    lower_memo_complete cfg
+      (ParserM.lift (memoizeStep counter g n next)) input := by
+  intro memo h_memo start
+  rw [lower_lift_snd_val_eq
+    (tag := tag cfg) (β := α)
+    (p := memoizeStep counter g n next)
+    (memo := memo) (input := input) (start := start)]
+  exact memo_complete_memoizeStep
+    (cfg := cfg) (input := input)
+    (counter := counter) (g := g) (next := next)
+    (n := n) (memo := memo) (start := start)
+    h_memo
+    (fun h_no_cache => h_compute memo h_memo start h_no_cache)
+
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem admissible_node_inv
   {cfg : @CFG α ν} {input : Array α}
@@ -4001,6 +4552,130 @@ theorem counter_getD_mono_default
       rfl
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
+theorem counter_getElem?_eq_of_toKey_eq
+  {left right : Counter ν}
+  (h_key : Counter.toKey left = Counter.toKey right)
+  (t : ν) :
+    left[t]? = right[t]? := by
+  cases h_left : left[t]? with
+  | some value =>
+      have h_mem_left :
+          (t, value) ∈ Counter.toKey left := by
+        change (t, value) ∈ left.unwrap.toList
+        rw [Std.HashMap.mem_toList_iff_getElem?_eq_some]
+        exact h_left
+      have h_mem_right :
+          (t, value) ∈ Counter.toKey right := by
+        simpa [h_key] using h_mem_left
+      exact
+        (by
+          change (t, value) ∈ right.unwrap.toList at h_mem_right
+          rw [Std.HashMap.mem_toList_iff_getElem?_eq_some] at h_mem_right
+          exact h_mem_right.symm)
+  | none =>
+      cases h_right : right[t]? with
+      | none => rfl
+      | some value =>
+          have h_mem_right :
+              (t, value) ∈ Counter.toKey right := by
+            change (t, value) ∈ right.unwrap.toList
+            rw [Std.HashMap.mem_toList_iff_getElem?_eq_some]
+            exact h_right
+          have h_mem_left :
+              (t, value) ∈ Counter.toKey left := by
+            simpa [h_key] using h_mem_right
+          have h_some :
+              left[t]? = some value :=
+            by
+              change (t, value) ∈ left.unwrap.toList at h_mem_left
+              rw [Std.HashMap.mem_toList_iff_getElem?_eq_some] at h_mem_left
+              exact h_mem_left
+          rw [h_left] at h_some
+          contradiction
+
+omit [BEq α] [DecidableEq α] [Fintype ν] in
+theorem counter_getD_eq_of_toKey_eq
+  {left right : Counter ν}
+  (h_key : Counter.toKey left = Counter.toKey right)
+  (t : ν) (fuel : ℕ) :
+    left.getD t fuel = right.getD t fuel := by
+  repeat rw [Std.HashMap.getD_eq_getD_getElem?]
+  change left[t]?.getD fuel = right[t]?.getD fuel
+  rw [counter_getElem?_eq_of_toKey_eq (left := left) (right := right) h_key t]
+
+omit [BEq α] [DecidableEq α] [Fintype ν] in
+theorem counter_dec_getElem?_eq_of_getElem?_eq
+  {left right : Counter ν}
+  (h_eq : ∀ t : ν, left[t]? = right[t]?)
+  (n t : ν) (fuel : ℕ) :
+    (left.dec n fuel)[t]? = (right.dec n fuel)[t]? := by
+  by_cases h_t : t = n
+  · subst t
+    have h_getD : left.getD n fuel = right.getD n fuel := by
+      repeat rw [Std.HashMap.getD_eq_getD_getElem?]
+      change left[n]?.getD fuel = right[n]?.getD fuel
+      rw [h_eq n]
+    rw [counter_dec_self_getElem?, counter_dec_self_getElem?, h_getD]
+  · have h_ne : n ≠ t := by
+      intro h_nt
+      exact h_t h_nt.symm
+    rw [counter_dec_other_getElem? (counter := left) (t := n) (u := t)
+        (fuel := fuel) h_ne,
+      counter_dec_other_getElem? (counter := right) (t := n) (u := t)
+        (fuel := fuel) h_ne,
+      h_eq t]
+
+set_option linter.unusedSectionVars false in
+mutual
+  theorem admissibleTreeWith_congr_counter_getElem?
+    {cfg : @CFG α ν} {input : Array α}
+    {seen : List (SpanVisit ν)} {left right : Counter ν}
+    {tree : ParseTree cfg} {start : ℕ}
+    (h_eq : ∀ t : ν, left[t]? = right[t]?)
+    (h_adm : AdmissibleTreeWith cfg input seen left tree start) :
+      AdmissibleTreeWith cfg input seen right tree start := by
+    cases h_adm with
+    | leaf =>
+        constructor
+    | node rule children h_no_cycle h_budget h_children =>
+        exact AdmissibleTreeWith.node
+          (cfg := cfg) (input := input) seen right
+          h_no_cycle
+          (by
+            intro h_zero
+            rw [← h_eq _] at h_zero
+            exact h_budget h_zero)
+          (admissibleForestWith_congr_counter_getElem?
+            (cfg := cfg) (input := input)
+            (by
+              intro t
+              exact counter_dec_getElem?_eq_of_getElem?_eq
+                (left := left) (right := right) h_eq _ t _)
+            h_children)
+
+  theorem admissibleForestWith_congr_counter_getElem?
+    {cfg : @CFG α ν} {input : Array α}
+    {seen : List (SpanVisit ν)} {left right : Counter ν}
+    {children : List (ParseTree cfg)} {start : ℕ}
+    (h_eq : ∀ t : ν, left[t]? = right[t]?)
+    (h_adm : AdmissibleForestWith cfg input seen left children start) :
+      AdmissibleForestWith cfg input seen right children start := by
+    cases h_adm with
+    | nil =>
+        exact AdmissibleForestWith.nil
+          (cfg := cfg) (input := input) seen right start
+    | cons child children h_child h_tail =>
+        exact AdmissibleForestWith.cons
+          (cfg := cfg) (input := input) seen right
+          (admissibleTreeWith_congr_counter_getElem?
+            (cfg := cfg) (input := input) (seen := seen)
+            h_eq h_child)
+          (admissibleForestWith_congr_counter_getElem?
+            (cfg := cfg) (input := input) (seen := seen)
+            h_eq h_tail)
+end
+
+omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counter_getElem?_ne_zero_of_one_le_getD
   (counter : Counter ν) (t : ν) (fuel : ℕ)
   (h : 1 ≤ counter.getD t fuel) :
@@ -4189,46 +4864,6 @@ lemma terminal'_complete
     (terminal' (tag := tag cfg) (μ := List) a)
     Leaf input start (start + 1) a h_terminal
 
-omit [Fintype ν] in
-inductive TraverseCompleteWitness
-  (cfg : @CFG α ν)
-  {γ : Type u} [DecidableEq γ]
-  (input : Array α)
-  : List (ParserM (tag := tag cfg) α List γ) → ℕ → List γ → ℕ → Prop where
-  | nil (pos : ℕ) :
-      TraverseCompleteWitness cfg input [] pos [] pos
-  | cons
-      {head : ParserM (tag := tag cfg) α List γ}
-      {tail : List (ParserM (tag := tag cfg) α List γ)}
-      {start split end_ : ℕ} {x : γ} {xs : List γ}
-      (h_head : x ∈ (runParser (tag := tag cfg) head input start).1.getD split [])
-      (h_tail : TraverseCompleteWitness cfg input tail split xs end_) :
-      TraverseCompleteWitness cfg input (head :: tail) start (x :: xs) end_
-
-omit [Fintype ν] in
-inductive GeneratedChildWitness
-  (cfg : @CFG α ν)
-  (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α)
-  : List (Symbol α ν) → List (ParseTree cfg) → ℕ → ℕ → Prop where
-  | nil (pos : ℕ) :
-      GeneratedChildWitness cfg recur input [] [] pos pos
-  | term
-      {a : α} {rest : List (Symbol α ν)} {children : List (ParseTree cfg)}
-      {start end_ : ℕ}
-      (h_term : input[start]? = some a)
-      (h_tail : GeneratedChildWitness cfg recur input rest children (start + 1) end_) :
-      GeneratedChildWitness cfg recur input
-        (Symbol.term a :: rest) (Leaf (cfg := cfg) a :: children) start end_
-  | nonterm
-      {n : ν} {tree : ParseTree cfg}
-      {rest : List (Symbol α ν)} {children : List (ParseTree cfg)}
-      {start split end_ : ℕ}
-      (h_child : tree ∈ (runParser (tag := tag cfg) (recur n) input start).1.getD split [])
-      (h_tail : GeneratedChildWitness cfg recur input rest children split end_) :
-      GeneratedChildWitness cfg recur input
-        (Symbol.nonterm n :: rest) (tree :: children) start end_
-
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 abbrev validChildPair {cfg : @CFG α ν} :
     Symbol α ν × ParseTree cfg → Prop
@@ -4347,6 +4982,23 @@ theorem lower_rule_branch_memo_wellFormed_of_traverse
     lower_memo_wellFormed cfg
       (Node n rule <$> List.traverse id (rule.val.map mkParser)) input := by
   exact lower_map_memo_wellFormed
+    (cfg := cfg)
+    (p := List.traverse id (rule.val.map mkParser))
+    (f := Node n rule)
+    h_children
+
+omit [Fintype ν] in
+theorem lower_rule_branch_memo_complete_of_traverse
+  {cfg : @CFG α ν}
+  {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
+  {mkParser : Symbol α ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
+  {input : Array α}
+  (h_children :
+    lower_memo_complete cfg
+      (List.traverse id (rule.val.map mkParser)) input) :
+    lower_memo_complete cfg
+      (Node n rule <$> List.traverse id (rule.val.map mkParser)) input := by
+  exact lower_map_memo_complete
     (cfg := cfg)
     (p := List.traverse id (rule.val.map mkParser))
     (f := Node n rule)
@@ -4525,6 +5177,197 @@ theorem lower_memo_wellFormed_generated_traverse_memoize
                 rest.map (generatedListSymbolParser cfg counter g)))
             input
           exact lower_memo_wellFormed_traverse_cons_memoize
+            (cfg := cfg) (counter := counter) (g := g) (n := n)
+            (tail := rest.map (generatedListSymbolParser cfg counter g))
+            (input := input)
+            (h_step n) ih
+
+omit [Fintype ν] in
+theorem lower_memo_complete_traverse_cons_terminal
+  {cfg : @CFG α ν}
+  {a : α}
+  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {input : Array α}
+  (h_tail :
+    lower_memo_complete cfg (List.traverse id tail) input) :
+    lower_memo_complete cfg
+      (List.traverse id
+        ((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) :: tail))
+      input := by
+  rw [List.traverse, seq_eq_bind]
+  simp
+  change lower_memo_complete cfg
+    (ParserM.Bind (terminalPrimitive (tag := tag cfg) a)
+      (fun x =>
+        (ParserM.Return (tag := tag cfg) (β := α) (μ := List)
+          (Leaf (cfg := cfg) x) >>= fun tree =>
+            List.cons tree <$> List.traverse id tail)))
+    input
+  exact lower_bind_constructor_memo_complete
+    (cfg := cfg) (input := input)
+    (p := terminalPrimitive (tag := tag cfg) a)
+    (k := fun x =>
+      (ParserM.Return (tag := tag cfg) (β := α) (μ := List)
+        (Leaf (cfg := cfg) x) >>= fun tree =>
+          List.cons tree <$> List.traverse id tail))
+    (by
+      intro start memo h_memo
+      rw [terminalPrimitive_snd_val_eq
+        (tag := tag cfg) (a := a)
+        (input := input) (start := start) (memo := memo)]
+      exact h_memo)
+    (by
+      intro x
+      change lower_memo_complete cfg
+        (List.cons (Leaf (cfg := cfg) x) <$> List.traverse id tail) input
+      exact lower_map_memo_complete
+        (cfg := cfg)
+        (p := List.traverse id tail)
+        (f := List.cons (Leaf (cfg := cfg) x))
+        h_tail)
+
+omit [Fintype ν] in
+theorem lower_memo_complete_traverse_cons_lift
+  {cfg : @CFG α ν}
+  {p : Parser (tag := tag cfg) α List (ParseTree cfg)}
+  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {input : Array α}
+  (h_p :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_tail :
+    lower_memo_complete cfg (List.traverse id tail) input) :
+    lower_memo_complete cfg
+      (List.traverse id ((ParserM.lift p) :: tail)) input := by
+  rw [List.traverse, seq_eq_bind]
+  simp
+  change lower_memo_complete cfg
+    (ParserM.Bind p (fun x => List.cons x <$> List.traverse id tail)) input
+  exact lower_bind_constructor_memo_complete
+    (cfg := cfg) (input := input)
+    (p := p)
+    (k := fun x => List.cons x <$> List.traverse id tail)
+    h_p
+    (by
+      intro x
+      exact lower_map_memo_complete
+        (cfg := cfg)
+        (p := List.traverse id tail)
+        (f := List.cons x)
+        h_tail)
+
+omit [Fintype ν] in
+theorem lower_memo_complete_traverse_cons_failure
+  {cfg : @CFG α ν}
+  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {input : Array α}
+  (h_tail :
+    lower_memo_complete cfg (List.traverse id tail) input) :
+    lower_memo_complete cfg
+      (List.traverse id
+        ((⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)) :: tail))
+      input := by
+  simpa [Bot.bot] using
+    lower_memo_complete_traverse_cons_lift
+      (cfg := cfg)
+      (p := (Parser.failure :
+        Parser (tag := tag cfg) α List (ParseTree cfg)))
+      (tail := tail) (input := input)
+      (by
+        intro start memo h_memo
+        simp [Parser.failure, ReaderT.pure, Pure.pure]
+        intro n counter pre post seen tree resultMap h_cache h_root h_adm
+          h_valid h_input
+        exact h_memo h_cache h_root h_adm h_valid h_input)
+      h_tail
+
+set_option linter.unusedSectionVars false in
+theorem lower_memo_complete_traverse_cons_memoize
+  {cfg : @CFG α ν}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  (n : ν)
+  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {input : Array α}
+  (h_step :
+    counter[n]? ≠ some 0 →
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((memoizeStep counter g n
+            (fun fuel => memoize (counter.dec n fuel) g) start)
+            memo input).2.val))
+  (h_tail :
+    lower_memo_complete cfg (List.traverse id tail) input) :
+    lower_memo_complete cfg
+      (List.traverse id ((memoize counter g n) :: tail)) input := by
+  by_cases h_counter : counter[n]? = some 0
+  · simpa [memoize, h_counter] using
+      lower_memo_complete_traverse_cons_failure
+        (cfg := cfg) (tail := tail) (input := input) h_tail
+  · simpa [memoize, h_counter] using
+      lower_memo_complete_traverse_cons_lift
+        (cfg := cfg)
+        (p := memoizeStep counter g n
+          (fun fuel => memoize (counter.dec n fuel) g))
+        (tail := tail) (input := input)
+        (h_step h_counter) h_tail
+
+set_option linter.unusedSectionVars false in
+theorem lower_memo_complete_generated_traverse_memoize
+  {cfg : @CFG α ν}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  (rule : List (Symbol α ν)) (input : Array α)
+  (h_step :
+    ∀ n,
+      counter[n]? ≠ some 0 →
+      ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((memoizeStep counter g n
+            (fun fuel => memoize (counter.dec n fuel) g) start)
+            memo input).2.val)) :
+    lower_memo_complete cfg
+      (List.traverse id
+        (rule.map (generatedListSymbolParser cfg counter g)))
+      input := by
+  induction rule with
+  | nil =>
+      intro memo h_memo start
+      change memo_complete cfg input
+        (↑(((ParserM.Return (tag := tag cfg) (β := α) (μ := List)
+          ([] : List (ParseTree cfg))).lower start) memo input).2)
+      rw [lower_return_snd_val_eq
+        (tag := tag cfg) (β := α)
+        (a := ([] : List (ParseTree cfg)))
+        (memo := memo) (input := input) (start := start)]
+      exact h_memo
+  | cons sym rest ih =>
+      cases sym with
+      | term a =>
+          change lower_memo_complete cfg
+            (List.traverse id
+              ((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) ::
+                rest.map (generatedListSymbolParser cfg counter g)))
+            input
+          exact lower_memo_complete_traverse_cons_terminal
+            (cfg := cfg) (a := a)
+            (tail := rest.map (generatedListSymbolParser cfg counter g))
+            (input := input) ih
+      | nonterm n =>
+          change lower_memo_complete cfg
+            (List.traverse id
+              ((memoize counter g n) ::
+                rest.map (generatedListSymbolParser cfg counter g)))
+            input
+          exact lower_memo_complete_traverse_cons_memoize
             (cfg := cfg) (counter := counter) (g := g) (n := n)
             (tail := rest.map (generatedListSymbolParser cfg counter g))
             (input := input)
@@ -5167,202 +6010,28 @@ theorem replaceSubtree_of_subtree
         ReplaceSubtree.child h_replace_child⟩
 
 omit [Fintype ν] in
-lemma generatedChildWitness_of_valid_pairs
-  {cfg : @CFG α ν}
-  {recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
-  {input : Array α}
-  {rule : List (Symbol α ν)} {children : List (ParseTree cfg)}
-  {pre post : List α}
-  (h_len : rule.length = children.length)
-  (h_valid :
-    ∀ pair, pair ∈ List.zip rule children → validChildPair (cfg := cfg) pair)
-  (h_input : input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post)
-  (h_recur :
-    ∀ {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
-      {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
-      (Node (cfg := cfg) childN rule' grandchildren).Valid →
-      input.toList = pre' ++ (Node (cfg := cfg) childN rule' grandchildren).leaves ++ post' →
-      Node (cfg := cfg) childN rule' grandchildren ∈
-        (runParser (tag := tag cfg) (recur childN) input pre'.length).1.getD
-          (pre'.length + (Node (cfg := cfg) childN rule' grandchildren).leaves.length) []) :
-    GeneratedChildWitness cfg recur input rule children pre.length
-      (pre.length + (forestLeaves (cfg := cfg) children).length) := by
-  induction rule generalizing children pre with
-  | nil =>
-      cases children with
-      | nil =>
-          simpa using GeneratedChildWitness.nil (cfg := cfg) (recur := recur)
-            (input := input) pre.length
-      | cons child tail =>
-          simp at h_len
-  | cons sym rest ih =>
-      cases children with
-      | nil =>
-          simp at h_len
-      | cons child tail =>
-          have h_len_tail : rest.length = tail.length := by
-            simpa using h_len
-          have h_tail_valid :
-              ∀ pair, pair ∈ List.zip rest tail → validChildPair (cfg := cfg) pair := by
-            intro pair h_pair
-            exact h_valid pair (by simp [h_pair])
-          have h_input_tail :
-              input.toList =
-                (pre ++ child.leaves) ++ forestLeaves (cfg := cfg) tail ++ post := by
-            simpa [forestLeaves, List.append_assoc] using h_input
-          cases sym with
-          | term a =>
-              cases child with
-              | Leaf b =>
-                  have h_ab : a = b := by
-                    have h_head := h_valid (Symbol.term a, Leaf (cfg := cfg) b) (by simp)
-                    simpa [validChildPair] using h_head
-                  cases h_ab
-                  have h_term : input[pre.length]? = some a := by
-                    apply array_getElem?_of_toList_eq_append_singleton
-                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc] using h_input
-                  have h_tail := ih h_len_tail h_tail_valid h_input_tail
-                  exact GeneratedChildWitness.term h_term
-                    (by
-                      simpa [forestLeaves, ParseTree.leaves, List.length_append,
-                        Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
-                        using h_tail)
-              | Node n' rule' grandchildren =>
-                  have h_false : False := by
-                    have h_head := h_valid
-                      (Symbol.term a, Node (cfg := cfg) n' rule' grandchildren) (by simp)
-                    simp [validChildPair] at h_head
-                  exact False.elim h_false
-          | nonterm childN =>
-              cases child with
-              | Leaf b =>
-                  have h_false : False := by
-                    have h_head := h_valid (Symbol.nonterm childN, Leaf (cfg := cfg) b) (by simp)
-                    simp [validChildPair] at h_head
-                  exact False.elim h_false
-              | Node n' rule' grandchildren =>
-                  have h_child_valid_root :
-                      childN = n' ∧ (Node (cfg := cfg) n' rule' grandchildren).Valid := by
-                    have h_head := h_valid
-                      (Symbol.nonterm childN, Node (cfg := cfg) n' rule' grandchildren) (by simp)
-                    simpa [validChildPair] using h_head
-                  obtain ⟨h_eq, h_child_valid⟩ := h_child_valid_root
-                  cases h_eq
-                  have h_child_mem :
-                      Node (cfg := cfg) childN rule' grandchildren ∈
-                        (runParser (tag := tag cfg) (recur childN) input pre.length).1.getD
-                          (pre.length +
-                            (Node (cfg := cfg) childN rule' grandchildren).leaves.length) [] := by
-                    apply h_recur h_child_valid
-                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc] using h_input
-                  have h_tail := ih h_len_tail h_tail_valid h_input_tail
-                  exact GeneratedChildWitness.nonterm h_child_mem
-                    (by
-                      simpa [forestLeaves, ParseTree.leaves, List.length_append, Nat.add_assoc]
-                        using h_tail)
-
-omit [Fintype ν] in
-lemma generatedChildWitness_of_valid_node_span
-  {cfg : @CFG α ν}
-  {recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
-  {input : Array α}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}} {children : List (ParseTree cfg)}
-  {pre post : List α}
-  (h_valid : (Node (cfg := cfg) n rule children).Valid)
-  (h_input : input.toList = pre ++ (Node (cfg := cfg) n rule children).leaves ++ post)
-  (h_recur :
-    ∀ {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
-      {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
-      (Node (cfg := cfg) childN rule' grandchildren).Valid →
-      input.toList = pre' ++ (Node (cfg := cfg) childN rule' grandchildren).leaves ++ post' →
-      Node (cfg := cfg) childN rule' grandchildren ∈
-        (runParser (tag := tag cfg) (recur childN) input pre'.length).1.getD
-          (pre'.length + (Node (cfg := cfg) childN rule' grandchildren).leaves.length) []) :
-    GeneratedChildWitness cfg recur input rule.val children pre.length
-      (pre.length + (Node (cfg := cfg) n rule children).leaves.length) := by
-  have h_valid' :
-      rule.val.length = children.length ∧
-      ∀ pair (_h : pair ∈ List.zip rule.val children), match _h_pair : pair, _h with
-        | ⟨Symbol.term a, Leaf b⟩, _ => a = b
-        | ⟨Symbol.nonterm n, subtree@_h:(Node n' _ _)⟩, _ => n = n' ∧ subtree.Valid
-        | _, _ => False := by
-    simpa [ParseTree.Valid] using h_valid
-  have h_pairs :
-      ∀ pair, pair ∈ List.zip rule.val children → validChildPair (cfg := cfg) pair := by
-    intro pair h_pair
-    have h := h_valid'.2 pair h_pair
-    cases pair with
-    | mk sym subtree =>
-        cases sym <;> cases subtree <;> simp [validChildPair] at h ⊢ <;> assumption
-  have h_witness := generatedChildWitness_of_valid_pairs
-    (cfg := cfg) (recur := recur) (input := input)
-    (rule := rule.val) (children := children) (pre := pre) (post := post)
-    h_valid'.1 h_pairs (by simpa using h_input) h_recur
-  simpa using h_witness
-
-omit [Fintype ν] in
-lemma generatedChildWitness_to_traverse
-  {cfg : @CFG α ν}
-  {recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
-  {input : Array α}
-  {rule : List (Symbol α ν)} {children : List (ParseTree cfg)}
-  {start end_ : ℕ}
-  (h : GeneratedChildWitness cfg recur input rule children start end_) :
-    TraverseCompleteWitness cfg input
-      (rule.map fun sym =>
-        match sym with
-        | Symbol.term a => Leaf <$> terminal' (tag := tag cfg) a
-        | Symbol.nonterm n => recur n)
-      start children end_ := by
-  induction h with
-  | nil pos =>
-      exact TraverseCompleteWitness.nil (cfg := cfg) (input := input) pos
-  | term h_term _h_tail ih =>
-      exact TraverseCompleteWitness.cons
-        (cfg := cfg) (input := input)
-        (h_head := terminal'_complete (cfg := cfg) h_term)
-        ih
-  | nonterm h_child _h_tail ih =>
-      exact TraverseCompleteWitness.cons
-        (cfg := cfg) (input := input)
-        (h_head := h_child)
-        ih
-
-omit [Fintype ν] in
-lemma runParser_traverse_complete_of_witness
-  {cfg : @CFG α ν}
-  {γ : Type u} [DecidableEq γ]
-  {input : Array α}
-  {parsers : List (ParserM (tag := tag cfg) α List γ)}
-  {start end_ : ℕ} {result : List γ}
-  (h : TraverseCompleteWitness cfg input parsers start result end_)
-  : result ∈ (runParser (tag := tag cfg) (List.traverse id parsers) input start).1.getD end_ [] := by
-  induction h with
-  | nil pos =>
-      rw [Std.HashMap.getD_eq_getD_getElem?, List.traverse, runParser_pure]
-      simp
-  | cons h_head _h_tail ih =>
-      exact runParser_traverse_complete_cons (cfg := cfg) h_head ih
-
-omit [Fintype ν] in
-lemma runParser_rule_branch_complete
+lemma lower_rule_branch_complete
   {cfg : @CFG α ν}
   {n : ν} {rule : List (Symbol α ν)}
   (h_rule : rule ∈ cfg.rules n)
   {mkParser : Symbol α ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
-  {input : Array α} {start end_ : ℕ} {subtrees : List (ParseTree cfg)}
+  {memo : MemoData (tag cfg) List} {input : Array α}
+  {start end_ : ℕ} {subtrees : List (ParseTree cfg)}
   (h_children :
-    TraverseCompleteWitness cfg input (rule.map mkParser) start subtrees end_)
-  : Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
-      (runParser (tag := tag cfg)
-        (Node n ⟨rule, h_rule⟩ <$>
-          List.traverse id (rule.map mkParser))
-        input start).1.getD end_ [] := by
-  apply runParser_map_complete (cfg := cfg)
+    subtrees ∈
+      (((List.traverse id (rule.map mkParser)).lower start)
+        memo input).1.getD end_ []) :
+    Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
+      (((Node n ⟨rule, h_rule⟩ <$>
+          List.traverse id (rule.map mkParser)).lower start)
+        memo input).1.getD end_ [] := by
+  exact mem_lower_map_of_mem
+    (tag := tag cfg) (β := α)
     (p := List.traverse id (rule.map mkParser))
     (f := Node n ⟨rule, h_rule⟩)
-    (x := subtrees)
-  exact runParser_traverse_complete_of_witness (cfg := cfg) h_children
+    (memo := memo) (input := input)
+    (start := start) (end_pos := end_)
+    (x := subtrees) h_children
 
 omit [Fintype ν] in
 lemma lower_terminal'_sound
@@ -5802,6 +6471,128 @@ lemma lower_traverse_complete_cons_return
     (cfg := cfg) (tail := tail) (memo := memo) (input := input)
     (start := start) (end_ := end_) (x := x) (xs := xs) h_tail
 
+omit [Fintype ν] in
+theorem lower_return_bind_cons_memo_complete
+  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
+  {tail : List (ParserM (tag := tag cfg) α List γ)}
+  {input : Array α} {x : γ}
+  (h_tail : lower_memo_complete cfg (List.traverse id tail) input) :
+    lower_memo_complete cfg
+      ((ParserM.Return (tag := tag cfg) (β := α) (μ := List) x) >>=
+        fun y => List.cons y <$> List.traverse id tail)
+      input := by
+  change lower_memo_complete cfg
+    (List.cons x <$> List.traverse id tail) input
+  exact lower_map_memo_complete
+    (cfg := cfg) (p := List.traverse id tail)
+    (f := List.cons x) h_tail
+
+set_option maxHeartbeats 700000 in
+omit [Fintype ν] in
+lemma lower_traverse_complete_cons_lift_of_head_tail_complete
+  {cfg : @CFG α ν}
+  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
+  {memo : MemoData (tag cfg) List} {input : Array α}
+  {start split end_ : ℕ}
+  {result_head : ParseTree cfg} {result_tail : List (ParseTree cfg)}
+  (p : Parser (tag := tag cfg) α List (ParseTree cfg))
+  (h_complete : memo_complete cfg input memo)
+  (h_p_memo :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input (((p start) memo input).2.val))
+  (h_tail_memo :
+    lower_memo_complete cfg (List.traverse id tail) input)
+  (h_head :
+    result_head ∈ ((p start) memo input).1.getD split [])
+  (h_tail :
+    ∀ memoTail : MemoData (tag cfg) List,
+      memo_complete cfg input memoTail →
+      result_tail ∈
+        (((List.traverse id tail).lower split) memoTail input).1.getD end_ []) :
+    result_head :: result_tail ∈
+      (((List.traverse id ((ParserM.lift p) :: tail)).lower start)
+        memo input).1.getD end_ [] := by
+  rw [Std.HashMap.getD_eq_getD_getElem?] at h_head
+  cases h_get : ((p start) memo input).1[split]? with
+  | none =>
+      simp [h_get] at h_head
+  | some values =>
+      simp [h_get] at h_head
+      refine mem_lower_traverse_complete_cons_of_bind_getElem_action_mem
+        (tag := tag cfg) (β := α)
+        (p := p)
+        (k := fun x =>
+          ParserM.Return (tag := tag cfg) (β := α) (μ := List) x)
+        (tail := tail)
+        (split := split) (values := values) (a := result_head)
+        (memo := memo) (input := input)
+        (start := start) (end_pos := end_)
+        (x := result_head) (xs := result_tail)
+        h_get h_head ?_
+      intro prePairs _postPairs preValues _postValues _h_toList _h_values
+      let memoPrefix : MemoData (tag cfg) List :=
+        ↑((Traversable.foldl joinUnderCache
+          (List.foldl (Traversable.foldl joinUnderCache)
+            (pure Std.HashMap.emptyWithCapacity)
+            (List.map
+              (fun pair : ℕ × List (ParseTree cfg) =>
+                match pair with
+                | (j, values) =>
+                    List.map
+                      (fun a =>
+                        (((ParserM.Return (tag := tag cfg) (β := α)
+                          (μ := List) a) >>= fun a =>
+                          List.cons a <$> List.traverse id tail).lower j))
+                      values)
+              prePairs))
+          (List.map
+            (fun a =>
+              (((ParserM.Return (tag := tag cfg) (β := α) (μ := List) a)
+                >>= fun a => List.cons a <$> List.traverse id tail).lower split))
+            preValues))
+          (↑((p start) memo input).2) input).2
+      have h_continue_memo :
+          ∀ x : ParseTree cfg,
+            lower_memo_complete cfg
+              ((ParserM.Return (tag := tag cfg) (β := α) (μ := List) x)
+                >>= fun y => List.cons y <$> List.traverse id tail)
+              input := by
+        intro x
+        exact lower_return_bind_cons_memo_complete
+          (cfg := cfg) (tail := tail) (input := input)
+          (x := x) h_tail_memo
+      have h_prefix :
+          memo_complete cfg input memoPrefix := by
+        intro n counter pre post seen tree resultMap h_cache h_root h_adm
+          h_valid h_input
+        exact
+          (bind_action_prefix_memo_complete
+            (cfg := cfg) (input := input)
+            (p := p)
+            (k := fun x =>
+              (ParserM.Return (tag := tag cfg) (β := α) (μ := List) x)
+                >>= fun y => List.cons y <$> List.traverse id tail)
+            (prePairs := prePairs) (preValues := preValues)
+            (split := split) (start := start)
+            (memo := memo)
+            (h_p := h_p_memo) (h_k := h_continue_memo)
+            (h_memo := h_complete))
+            (by simpa [memoPrefix] using h_cache)
+            h_root h_adm h_valid h_input
+      have h_tail_mem := h_tail memoPrefix h_prefix
+      change result_head :: result_tail ∈
+        ((((ParserM.Return (tag := tag cfg) (β := α) (μ := List)
+              result_head) >>=
+            fun y => List.cons y <$> List.traverse id tail).lower split)
+          memoPrefix input).1.getD end_ []
+      exact lower_return_bind_cons_complete
+        (cfg := cfg) (tail := tail)
+        (memo := memoPrefix) (input := input)
+        (start := split) (end_ := end_)
+        (x := result_head) (xs := result_tail) h_tail_mem
+
 set_option maxHeartbeats 700000 in
 omit [Fintype ν] in
 lemma lower_traverse_complete_cons_terminal
@@ -5910,6 +6701,272 @@ lemma lower_traverse_complete_cons_terminal
       exact h_action
   simpa [terminal'_eq_lift_terminalPrimitive (tag := tag cfg) (a := a)]
     using h_bind
+
+set_option maxHeartbeats 1000000 in
+theorem lower_generated_traverse_complete_of_admissible_valid_pairs
+  {cfg : @CFG α ν}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  {rule : List (Symbol α ν)} {children : List (ParseTree cfg)}
+  {input : Array α} {memo : MemoData (tag cfg) List}
+  {seen : List (SpanVisit ν)} {pre post : List α}
+  (h_complete : memo_complete cfg input memo)
+  (h_adm :
+    AdmissibleForestWith cfg input seen counter children pre.length)
+  (h_len : rule.length = children.length)
+  (h_valid :
+    ∀ pair, pair ∈ List.zip rule children → validChildPair (cfg := cfg) pair)
+  (h_input : input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post)
+  (h_step :
+    ∀ n,
+      counter[n]? ≠ some 0 →
+      ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((memoizeStep counter g n
+            (fun fuel => memoize (counter.dec n fuel) g) start)
+            memo input).2.val))
+  (h_recur :
+    ∀ {memo : MemoData (tag cfg) List},
+      memo_complete cfg input memo →
+      ∀ {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
+        {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
+        Node (cfg := cfg) childN rule' grandchildren ∈ children →
+        AdmissibleTreeWith cfg input seen counter
+          (Node (cfg := cfg) childN rule' grandchildren) pre'.length →
+        (Node (cfg := cfg) childN rule' grandchildren).Valid →
+        input.toList =
+          pre' ++ (Node (cfg := cfg) childN rule' grandchildren).leaves ++ post' →
+        Node (cfg := cfg) childN rule' grandchildren ∈
+          (((memoize counter g childN).lower pre'.length) memo input).1.getD
+            (pre'.length +
+              (Node (cfg := cfg) childN rule' grandchildren).leaves.length) []) :
+    children ∈
+      (((List.traverse id
+        (rule.map (generatedListSymbolParser cfg counter g))).lower pre.length)
+        memo input).1.getD
+        (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
+  induction rule generalizing children pre memo with
+  | nil =>
+      cases children with
+      | nil =>
+          have h_return :
+              ([] : List (ParseTree cfg)) ∈
+                (((ParserM.Return (tag := tag cfg) (β := α) (μ := List)
+                    ([] : List (ParseTree cfg))).lower pre.length)
+                  memo input).1.getD pre.length [] := by
+            exact (mem_lower_return_iff
+              (tag := tag cfg) (β := α)
+              (a := ([] : List (ParseTree cfg)))
+              (x := ([] : List (ParseTree cfg)))
+              (memo := memo) (input := input)
+              (start := pre.length) (end_pos := pre.length)).mpr
+              ⟨rfl, rfl⟩
+          simpa [List.traverse, forestLeaves] using h_return
+      | cons child tail =>
+          simp at h_len
+  | cons sym rest ih =>
+      cases children with
+      | nil =>
+          simp at h_len
+      | cons child tail =>
+          have h_len_tail : rest.length = tail.length := by
+            simpa using h_len
+          obtain ⟨h_child_adm, h_tail_adm⟩ :=
+            admissible_forest_cons_inv (cfg := cfg) h_adm
+          have h_tail_valid :
+              ∀ pair, pair ∈ List.zip rest tail → validChildPair (cfg := cfg) pair := by
+            intro pair h_pair
+            exact h_valid pair (by simp [h_pair])
+          have h_input_tail :
+              input.toList =
+                (pre ++ child.leaves) ++ forestLeaves (cfg := cfg) tail ++ post := by
+            simpa [forestLeaves, List.append_assoc] using h_input
+          cases sym with
+          | term a =>
+              cases child with
+              | Leaf b =>
+                  have h_ab : a = b := by
+                    have h_head :=
+                      h_valid (Symbol.term a, Leaf (cfg := cfg) b) (by simp)
+                    simpa [validChildPair] using h_head
+                  cases h_ab
+                  have h_term : input[pre.length]? = some a := by
+                    apply array_getElem?_of_toList_eq_append_singleton
+                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc]
+                      using h_input
+                  have h_tail_mem :
+                      tail ∈
+                        (((List.traverse id
+                          (rest.map (generatedListSymbolParser cfg counter g))).lower
+                          (pre ++ [a]).length)
+                          memo input).1.getD
+                          ((pre ++ [a]).length +
+                            (forestLeaves (cfg := cfg) tail).length) [] := by
+                    exact ih
+                      (children := tail) (pre := pre ++ [a])
+                      (memo := memo)
+                      h_complete
+                      (by simpa [ParseTree.leaves] using h_tail_adm)
+                      h_len_tail h_tail_valid
+                      (by
+                        simpa [ParseTree.leaves] using h_input_tail)
+                      (by
+                        intro memo' h_complete' childN rule' grandchildren
+                          pre' post' h_mem h_adm_child h_child_valid h_child_input
+                        exact h_recur h_complete'
+                          (by simp [h_mem])
+                          h_adm_child h_child_valid h_child_input)
+                  have h_cons :=
+                    lower_traverse_complete_cons_terminal
+                      (cfg := cfg) (a := a)
+                      (tail := rest.map (generatedListSymbolParser cfg counter g))
+                      (memo := memo) (input := input)
+                      (start := pre.length)
+                      (end_ := (pre ++ [a]).length +
+                        (forestLeaves (cfg := cfg) tail).length)
+                      (result_tail := tail)
+                      h_term
+                      (by simpa [List.length_append, ParseTree.leaves] using h_tail_mem)
+                  simpa [generatedListSymbolParser, forestLeaves, ParseTree.leaves,
+                    List.length_append, Nat.add_assoc, Nat.add_comm,
+                    Nat.add_left_comm] using h_cons
+              | Node childN rule' grandchildren =>
+                  have h_false : False := by
+                    have h_head :=
+                      h_valid
+                        (Symbol.term a,
+                          Node (cfg := cfg) childN rule' grandchildren) (by simp)
+                    simp [validChildPair] at h_head
+                  exact False.elim h_false
+          | nonterm childN =>
+              cases child with
+              | Leaf b =>
+                  have h_false : False := by
+                    have h_head :=
+                      h_valid (Symbol.nonterm childN, Leaf (cfg := cfg) b) (by simp)
+                    simp [validChildPair] at h_head
+                  exact False.elim h_false
+              | Node n' rule' grandchildren =>
+                  have h_child_valid_root :
+                      childN = n' ∧
+                        (Node (cfg := cfg) n' rule' grandchildren).Valid := by
+                    have h_head :=
+                      h_valid
+                        (Symbol.nonterm childN,
+                          Node (cfg := cfg) n' rule' grandchildren) (by simp)
+                    simpa [validChildPair] using h_head
+                  obtain ⟨h_eq, h_child_valid⟩ := h_child_valid_root
+                  cases h_eq
+                  obtain ⟨_h_no_cycle, h_budget, _h_children_adm⟩ :=
+                    admissible_node_inv (cfg := cfg) h_child_adm
+                  have h_child_input :
+                      input.toList =
+                        pre ++
+                          (Node (cfg := cfg) childN rule' grandchildren).leaves ++
+                          (forestLeaves (cfg := cfg) tail ++ post) := by
+                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc]
+                      using h_input
+                  have h_child_mem :
+                      Node (cfg := cfg) childN rule' grandchildren ∈
+                        (((memoize counter g childN).lower pre.length)
+                          memo input).1.getD
+                          (pre.length +
+                            (Node (cfg := cfg) childN rule' grandchildren).leaves.length) [] := by
+                    exact h_recur h_complete
+                      (by simp)
+                      h_child_adm h_child_valid h_child_input
+                  let step : Parser (tag := tag cfg) α List (ParseTree cfg) :=
+                    memoizeStep counter g childN
+                      (fun fuel => memoize (counter.dec childN fuel) g)
+                  have h_head_lift :
+                      Node (cfg := cfg) childN rule' grandchildren ∈
+                        (((ParserM.lift step :
+                          ParserM (tag := tag cfg) α List (ParseTree cfg)).lower
+                          pre.length) memo input).1.getD
+                          (pre.length +
+                            (Node (cfg := cfg) childN rule' grandchildren).leaves.length) [] := by
+                    simpa [memoize, h_budget, step] using h_child_mem
+                  have h_head_step :
+                      Node (cfg := cfg) childN rule' grandchildren ∈
+                        ((step pre.length) memo input).1.getD
+                          (pre.length +
+                            (Node (cfg := cfg) childN rule' grandchildren).leaves.length) [] := by
+                    exact mem_lower_lift_exists_of_mem
+                      (tag := tag cfg) (β := α)
+                      (p := step)
+                      (memo := memo) (input := input)
+                      (start := pre.length)
+                      (end_pos := pre.length +
+                        (Node (cfg := cfg) childN rule' grandchildren).leaves.length)
+                      (x := Node (cfg := cfg) childN rule' grandchildren)
+                      h_head_lift
+                  have h_tail_memo :
+                      lower_memo_complete cfg
+                        (List.traverse id
+                          (rest.map (generatedListSymbolParser cfg counter g)))
+                        input :=
+                    lower_memo_complete_generated_traverse_memoize
+                      (cfg := cfg) counter g rest input h_step
+                  have h_tail :
+                      ∀ memoTail : MemoData (tag cfg) List,
+                        memo_complete cfg input memoTail →
+                        tail ∈
+                          (((List.traverse id
+                            (rest.map (generatedListSymbolParser cfg counter g))).lower
+                            (pre.length +
+                              (Node (cfg := cfg) childN rule' grandchildren).leaves.length))
+                            memoTail input).1.getD
+                            (pre.length +
+                              (Node (cfg := cfg) childN rule' grandchildren).leaves.length +
+                              (forestLeaves (cfg := cfg) tail).length) [] := by
+                    intro memoTail h_complete_tail
+                    have h_tail_input :
+                        input.toList =
+                          (pre ++
+                            (Node (cfg := cfg) childN rule' grandchildren).leaves) ++
+                            forestLeaves (cfg := cfg) tail ++ post := by
+                      simpa [List.append_assoc] using h_child_input
+                    simpa [List.length_append] using
+                      (ih
+                        (children := tail)
+                        (pre := pre ++
+                          (Node (cfg := cfg) childN rule' grandchildren).leaves)
+                        (memo := memoTail)
+                        h_complete_tail
+                        (by
+                          simpa [forestLeaves, ParseTree.leaves, List.length_append,
+                            Nat.add_assoc] using h_tail_adm)
+                        h_len_tail h_tail_valid
+                        h_tail_input
+                        (by
+                          intro memo' h_complete' childN' rule'' grandchildren'
+                            pre' post' h_mem h_adm_child h_child_valid' h_child_input'
+                          exact h_recur h_complete'
+                            (by simp [h_mem])
+                            h_adm_child h_child_valid' h_child_input'))
+                  have h_cons :=
+                    lower_traverse_complete_cons_lift_of_head_tail_complete
+                      (cfg := cfg)
+                      (tail := rest.map (generatedListSymbolParser cfg counter g))
+                      (memo := memo) (input := input)
+                      (start := pre.length)
+                      (split := pre.length +
+                        (Node (cfg := cfg) childN rule' grandchildren).leaves.length)
+                      (end_ := pre.length +
+                        (Node (cfg := cfg) childN rule' grandchildren).leaves.length +
+                        (forestLeaves (cfg := cfg) tail).length)
+                      (result_head := Node (cfg := cfg) childN rule' grandchildren)
+                      (result_tail := tail)
+                      step h_complete
+                      (h_step childN h_budget)
+                      h_tail_memo
+                      h_head_step h_tail
+                  simpa [generatedListSymbolParser, memoize, h_budget, step,
+                    forestLeaves, ParseTree.leaves, List.length_append,
+                    Nat.add_assoc] using h_cons
 
 -- set_option maxHeartbeats 800000 in
 omit [Fintype ν] in
@@ -6215,6 +7272,47 @@ theorem lower_failure_memo_wellFormed
   exact h_memo
 
 omit [Fintype ν] in
+theorem lower_failure_memo_complete
+  (cfg : @CFG α ν) (input : Array α) :
+    lower_memo_complete cfg
+      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)) input := by
+  unfold lower_memo_complete
+  intro memo h_memo start
+  simp [Bot.bot, ParserM.lift, ParserM.lower]
+  unfold Parser.failure Parser.bind Parser.bindRun Parser.bindContinue
+    Parser.bindActions
+  simp [ReaderT.pure, Pure.pure, instMonadMStateT,
+    Functor.map, hashMap_emptyWithCapacity_toList_eq_nil]
+  exact h_memo
+
+omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
+theorem lower_gen'_memo_complete_of_rules
+  {cfg : @CFG α ν} {input : Array α}
+  (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  (n : ν)
+  (h_rules :
+    ∀ rule : {rule // rule ∈ cfg.rules n},
+      lower_memo_complete cfg (generatedRuleParser cfg recur n rule) input) :
+    lower_memo_complete cfg (gen' (μ := List) cfg recur n) input := by
+  have h_fold :
+      lower_memo_complete cfg
+        (((cfg.rules n).attach.map (generatedRuleParser cfg recur n)).foldl
+          ParserM.instMaxOfTraversableOfDecidableEq.max
+          (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)))
+        input :=
+    lower_memo_complete_of_foldl_sup
+      (cfg := cfg) (input := input)
+      ((cfg.rules n).attach.map (generatedRuleParser cfg recur n))
+      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))
+      (lower_failure_memo_complete cfg input)
+      (by
+        intro p h_p
+        rw [List.mem_map] at h_p
+        rcases h_p with ⟨rule, _h_rule, rfl⟩
+        exact h_rules rule)
+  simpa [gen', generatedRuleParser, generatedSymbolParser] using h_fold
+
+omit [Fintype ν] in
 lemma failure_empty (cfg : @CFG α ν) {start : ℕ} : (runParser (tag := tag cfg) (⊥ : ParserM α μ (ParseTree cfg)) input start).1.isEmpty := by
   simp [Bot.bot, runParser, ReaderT.run, MStateT.run, ParserM.lift, ParserM.lower]
   unfold Parser.failure Parser.bind Parser.bindRun Parser.bindContinue Parser.bindActions
@@ -6320,6 +7418,38 @@ theorem lower_memo_wellFormed_memoize
       lower_failure_memo_wellFormed cfg input
   · simpa [memoize, h_counter] using
       lower_memo_wellFormed_memoizeStep_lift
+        (cfg := cfg) (input := input)
+        (counter := counter) (g := g)
+        (next := fun fuel => memoize (counter.dec n fuel) g)
+        (n := n) h_compute
+
+set_option linter.unusedSectionVars false in
+theorem lower_memo_complete_memoize
+  {cfg : @CFG α ν} {input : Array α}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  {n : ν}
+  (h_compute :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      ∀ start : ℕ,
+      ∀ _h_no_cache :
+        (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+        memo_complete cfg input
+            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
+                n).lower start)
+              memo input).2.val) ∧
+          resultMap_complete cfg input n (Counter.toKey counter) start
+            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
+                n).lower start)
+              memo input).1)) :
+    lower_memo_complete cfg (memoize counter g n) input := by
+  by_cases h_counter : counter[n]? = some 0
+  · simpa [memoize, h_counter] using
+      lower_failure_memo_complete cfg input
+  · simpa [memoize, h_counter] using
+      lower_memo_complete_memoizeStep_lift
         (cfg := cfg) (input := input)
         (counter := counter) (g := g)
         (next := fun fuel => memoize (counter.dec n fuel) g)
@@ -7411,65 +8541,6 @@ theorem lower_complete_of_sup_right_after_left
     p q memo input start end_ tree).mpr (Or.inr h_mem)
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem complete_of_sup_left
-  (cfg : @CFG α ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α) {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem : tree ∈ (runParser p input start).1.getD end_ []) :
-    tree ∈ (runParser (p ⊔ q) input start).1.getD end_ [] := by
-  exact (mem_runParser_sup_iff_after_left
-    (tag := tag cfg) (β := α)
-    p q input start end_ tree).mpr (Or.inl h_mem)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem complete_of_sup_right
-  (cfg : @CFG α ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α) {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem : tree ∈ (runParser q input start).1.getD end_ []) :
-    tree ∈ (runParser (p ⊔ q) input start).1.getD end_ [] := by
-  have h := runParser_sup_eq_sup_runParser p q input start
-  have h' := Std.HashMap.EquivQuot.getD_eq (s := SemilatticeAlt.setoid) (k := end_) (fallback := []) h
-  simp [SemilatticeAlt.setoid, List.memSetoid] at h'
-  dsimp [Subset, List.Subset] at *
-  apply h'.2
-  dsimp [Max.max]
-  by_cases h_p_contains_end_ : end_ ∈ (runParser p input start).1
-  · by_cases h_q_contains_end_ : end_ ∈ (runParser q input start).1
-    · have h_union := Std.HashMap.unionSup_getD_both
-        (s := SemilatticeAlt.setoid)
-        (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid)
-        h_p_contains_end_ h_q_contains_end_
-      simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h_union
-      apply h_union.2
-      simp [Max.max, SemilatticeAlt.orElse]
-      right
-      simpa [Std.HashMap.getElem_eq_getD (fallback := [])] using h_mem
-    ·
-      simp [Std.HashMap.getD_eq_fallback h_q_contains_end_] at h_mem
-  · have h_union := Std.HashMap.unionSup_getD_of_not_contains
-      (s := SemilatticeAlt.setoid)
-      (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid)
-      (fallback := []) (runParser p input start).1 (runParser q input start).1
-      h_p_contains_end_
-    simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h_union
-    exact h_union.2 h_mem
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem complete_of_sup_right_after_left
-  (cfg : @CFG α ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α) {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem :
-    tree ∈
-      ((q.lower start)
-        (↑(((p.lower start) startState input).2)) input).1.getD end_ []) :
-    tree ∈ (runParser (p ⊔ q) input start).1.getD end_ [] := by
-  exact (mem_runParser_sup_iff_after_left
-    (tag := tag cfg) (β := α)
-    p q input start end_ tree).mpr (Or.inr h_mem)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 theorem lower_complete_of_foldl_sup_acc
   (cfg : @CFG α ν)
   (parsers : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
@@ -7530,316 +8601,282 @@ theorem lower_complete_of_foldl_sup_mem_after_prefix
     (head := p) (memo := memo) (input := input) h_mem
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem complete_of_foldl_sup_mem_after_prefix
+theorem lower_complete_of_foldl_sup_mem_split
   (cfg : @CFG α ν)
-  (pre suffix : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
+  (parsers pre suffix : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
   (acc p : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α) {start end_ : ℕ} {tree : ParseTree cfg}
+  (memo : MemoData (tag cfg) List) (input : Array α)
+  {start end_ : ℕ} {tree : ParseTree cfg}
+  (h_split : parsers = pre ++ p :: suffix)
   (h_mem :
     tree ∈
       ((p.lower start)
         (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
-          startState input).2)) input).1.getD end_ []) :
+          memo input).2)) input).1.getD end_ []) :
     tree ∈
-      (runParser
-        ((pre ++ p :: suffix).foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
-        input start).1.getD end_ [] := by
-  rw [runParser_fst_eq_lower]
+      (((parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
+        memo input).1.getD end_ [] := by
+  subst parsers
   exact lower_complete_of_foldl_sup_mem_after_prefix
     (cfg := cfg) (pre := pre) (suffix := suffix)
     (acc := acc) (p := p)
-    (memo := startState) (input := input) h_mem
+    (memo := memo) (input := input) h_mem
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem complete_of_foldl_sup_acc
-  (cfg : @CFG α ν)
-  (parsers : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
-  (acc : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α) {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem : tree ∈ (runParser acc input start).1.getD end_ []) :
-    tree ∈
-      (runParser
-        (parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
-        input start).1.getD end_ [] := by
-  induction parsers generalizing acc with
-  | nil =>
-      simpa using h_mem
-  | cons head tail ih =>
-      simp [List.foldl]
-      apply ih
-      exact complete_of_sup_left cfg acc head input h_mem
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem complete_of_foldl_sup_mem
-  (cfg : @CFG α ν)
-  (parsers : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
-  (acc p : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (input : Array α) {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_p : p ∈ parsers)
-  (h_mem : tree ∈ (runParser p input start).1.getD end_ []) :
-    tree ∈
-      (runParser
-        (parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
-        input start).1.getD end_ [] := by
-  induction parsers generalizing acc with
-  | nil =>
-      simp at h_p
-  | cons head tail ih =>
-      simp at h_p
-      cases h_p with
-      | inl h_eq =>
-          have h_head_mem : tree ∈ (runParser head input start).1.getD end_ [] := by
-            simpa [h_eq] using h_mem
-          simp [List.foldl]
-          apply complete_of_foldl_sup_acc cfg tail (acc ⊔ head) input
-          exact complete_of_sup_right cfg acc head input h_head_mem
-      | inr h_tail =>
-          simp [List.foldl]
-          exact ih (acc := acc ⊔ head) h_tail
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem gen'_rule_complete
+theorem lower_gen'_rule_complete_after_split
   (cfg : @CFG α ν)
   (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
   {n : ν} {rule : List (Symbol α ν)}
   (h_rule : rule ∈ cfg.rules n)
-  {input : Array α} {start end_ : ℕ} {subtrees : List (ParseTree cfg)}
+  (pre suffix : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
+  {memo : MemoData (tag cfg) List} {input : Array α}
+  {start end_ : ℕ} {subtrees : List (ParseTree cfg)}
+  (h_split :
+    (cfg.rules n).attach.map (generatedRuleParser cfg recur n) =
+      pre ++ generatedRuleParser cfg recur n ⟨rule, h_rule⟩ :: suffix)
   (h_children :
-    TraverseCompleteWitness cfg input
-      (rule.map fun sym =>
-        match sym with
-        | Symbol.term a => Leaf <$> terminal' (tag := tag cfg) a
-        | Symbol.nonterm n => recur n)
-      start subtrees end_) :
+    subtrees ∈
+      (((List.traverse id (rule.map (generatedSymbolParser cfg recur))).lower start)
+        (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
+          (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower start)
+          memo input).2)) input).1.getD end_ []) :
     Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
-      (runParser (tag := tag cfg) (gen' (μ := List) cfg recur n)
-        input start).1.getD end_ [] := by
-  unfold gen'
-  let parseSym : Symbol α ν → ParserM (tag := tag cfg) α List (ParseTree cfg) :=
-    fun sym =>
-      match sym with
-      | Symbol.term a => Leaf <$> terminal' (tag := tag cfg) a
-      | Symbol.nonterm n => recur n
-  let parseRule : {rule // rule ∈ cfg.rules n} → ParserM (tag := tag cfg) α List (ParseTree cfg) :=
-    fun rule =>
-      Node n rule <$> List.traverse id (List.map parseSym rule)
+      (((gen' (μ := List) cfg recur n).lower start) memo input).1.getD end_ [] := by
   have h_branch :
       Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
-        (runParser (tag := tag cfg) (parseRule ⟨rule, h_rule⟩)
-          input start).1.getD end_ [] := by
-    simpa [parseRule, parseSym] using
-      (runParser_rule_branch_complete (cfg := cfg) (n := n)
-        (rule := rule) h_rule
-        (mkParser := parseSym)
+        (((generatedRuleParser cfg recur n ⟨rule, h_rule⟩).lower start)
+          (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
+            (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower start)
+            memo input).2)) input).1.getD end_ [] := by
+    simpa [generatedRuleParser] using
+      lower_rule_branch_complete
+        (cfg := cfg) (n := n) (rule := rule) h_rule
+        (mkParser := generatedSymbolParser cfg recur)
+        (memo :=
+          ↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
+            (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower start)
+            memo input).2))
         (input := input) (start := start) (end_ := end_)
-        (subtrees := subtrees)
-        (by simpa [parseSym] using h_children))
-  have h_parseRule_mem :
-      parseRule ⟨rule, h_rule⟩ ∈ (cfg.rules n).attach.map parseRule := by
-    exact List.mem_map.mpr ⟨⟨rule, h_rule⟩, by simp, rfl⟩
-  simpa [parseRule, parseSym] using
-    (complete_of_foldl_sup_mem cfg
-      ((cfg.rules n).attach.map parseRule)
-      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))
-      (parseRule ⟨rule, h_rule⟩)
-      input h_parseRule_mem h_branch)
+        (subtrees := subtrees) h_children
+  have h_fold :=
+    lower_complete_of_foldl_sup_mem_split
+      (cfg := cfg)
+      (parsers := (cfg.rules n).attach.map (generatedRuleParser cfg recur n))
+      (pre := pre) (suffix := suffix)
+      (acc := (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)))
+      (p := generatedRuleParser cfg recur n ⟨rule, h_rule⟩)
+      (memo := memo) (input := input)
+      (start := start) (end_ := end_)
+      (tree := Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees)
+      h_split h_branch
+  simpa [gen', generatedRuleParser, generatedSymbolParser] using h_fold
+
+omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
+theorem list_split_of_mem
+  {δ : Type u} {x : δ} {xs : List δ}
+  (h_mem : x ∈ xs) :
+    ∃ pre suffix, xs = pre ++ x :: suffix := by
+  induction xs with
+  | nil =>
+      simp at h_mem
+  | cons head tail ih =>
+      simp at h_mem
+      cases h_mem with
+      | inl h_eq =>
+          cases h_eq
+          exact ⟨[], tail, rfl⟩
+      | inr h_tail =>
+          obtain ⟨pre, suffix, h_split⟩ := ih h_tail
+          exact ⟨head :: pre, suffix, by simp [h_split]⟩
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem gen'_rule_complete_of_child_witness
+theorem generatedRuleParser_split_of_rule_mem
   (cfg : @CFG α ν)
   (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
   {n : ν} {rule : List (Symbol α ν)}
-  (h_rule : rule ∈ cfg.rules n)
-  {input : Array α} {start end_ : ℕ} {subtrees : List (ParseTree cfg)}
-  (h_children : GeneratedChildWitness cfg recur input rule subtrees start end_) :
-    Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
-      (runParser (tag := tag cfg) (gen' (μ := List) cfg recur n)
-        input start).1.getD end_ [] := by
-  exact gen'_rule_complete cfg recur h_rule
-    (generatedChildWitness_to_traverse (cfg := cfg) h_children)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] in
-lemma generatedChildWitness_of_admissible_valid_pairs
-  {cfg : @CFG α ν}
-  {input : Array α}
-  {seen : List (SpanVisit ν)} {counter : Counter ν}
-  {rule : List (Symbol α ν)} {children : List (ParseTree cfg)}
-  {pre post : List α}
-  (h_adm :
-    AdmissibleForestWith cfg input seen counter children pre.length)
-  (h_len : rule.length = children.length)
-  (h_valid :
-    ∀ pair, pair ∈ List.zip rule children → validChildPair (cfg := cfg) pair)
-  (h_input : input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post)
-  (h_recur :
-    ∀ {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
-      {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
-      Node (cfg := cfg) childN rule' grandchildren ∈ children →
-      AdmissibleTreeWith cfg input seen counter
-        (Node (cfg := cfg) childN rule' grandchildren) pre'.length →
-      (Node (cfg := cfg) childN rule' grandchildren).Valid →
-      input.toList =
-        pre' ++ (Node (cfg := cfg) childN rule' grandchildren).leaves ++ post' →
-      Node (cfg := cfg) childN rule' grandchildren ∈
-        (runParser (tag := tag cfg)
-          (memoize counter (gen' (μ := List) cfg) childN)
-          input pre'.length).1.getD
-          (pre'.length +
-            (Node (cfg := cfg) childN rule' grandchildren).leaves.length) []) :
-    GeneratedChildWitness cfg
-      (memoize counter (gen' (μ := List) cfg)) input rule children pre.length
-      (pre.length + (forestLeaves (cfg := cfg) children).length) := by
-  induction rule generalizing children pre with
-  | nil =>
-      cases children with
-      | nil =>
-          simpa using GeneratedChildWitness.nil
-            (cfg := cfg)
-            (recur := memoize counter (gen' (μ := List) cfg))
-            (input := input) pre.length
-      | cons child tail =>
-          simp at h_len
-  | cons sym rest ih =>
-      cases children with
-      | nil =>
-          simp at h_len
-      | cons child tail =>
-          obtain ⟨h_child_adm, h_tail_adm⟩ :=
-            admissible_forest_cons_inv (cfg := cfg) h_adm
-          have h_len_tail : rest.length = tail.length := by
-            simpa using h_len
-          have h_tail_valid :
-              ∀ pair, pair ∈ List.zip rest tail → validChildPair (cfg := cfg) pair := by
-            intro pair h_pair
-            exact h_valid pair (by simp [h_pair])
-          have h_input_tail :
-              input.toList =
-                (pre ++ child.leaves) ++ forestLeaves (cfg := cfg) tail ++ post := by
-            simpa [forestLeaves, List.append_assoc] using h_input
-          have h_tail_adm' :
-              AdmissibleForestWith cfg input seen counter tail
-                (pre ++ child.leaves).length := by
-            simpa [List.length_append] using h_tail_adm
-          have h_recur_tail :
-              ∀ {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
-                {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
-                Node (cfg := cfg) childN rule' grandchildren ∈ tail →
-                AdmissibleTreeWith cfg input seen counter
-                  (Node (cfg := cfg) childN rule' grandchildren) pre'.length →
-                (Node (cfg := cfg) childN rule' grandchildren).Valid →
-                input.toList =
-                  pre' ++
-                    (Node (cfg := cfg) childN rule' grandchildren).leaves ++
-                    post' →
-                Node (cfg := cfg) childN rule' grandchildren ∈
-                  (runParser (tag := tag cfg)
-                    (memoize counter (gen' (μ := List) cfg) childN)
-                    input pre'.length).1.getD
-                    (pre'.length +
-                      (Node (cfg := cfg) childN rule' grandchildren).leaves.length) [] := by
-            intro childN rule' grandchildren pre' post' h_mem h_adm_child
-              h_valid_child h_input_child
-            exact h_recur (by simp [h_mem]) h_adm_child h_valid_child h_input_child
-          cases sym with
-          | term a =>
-              cases child with
-              | Leaf b =>
-                  have h_ab : a = b := by
-                    have h_head :=
-                      h_valid (Symbol.term a, Leaf (cfg := cfg) b) (by simp)
-                    simpa [validChildPair] using h_head
-                  cases h_ab
-                  have h_term : input[pre.length]? = some a := by
-                    apply array_getElem?_of_toList_eq_append_singleton
-                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc]
-                      using h_input
-                  have h_tail :=
-                    ih h_tail_adm' h_len_tail h_tail_valid h_input_tail h_recur_tail
-                  exact GeneratedChildWitness.term h_term
-                    (by
-                      simpa [forestLeaves, ParseTree.leaves, List.length_append,
-                        Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
-                        using h_tail)
-              | Node n' rule' grandchildren =>
-                  have h_false : False := by
-                    have h_head := h_valid
-                      (Symbol.term a, Node (cfg := cfg) n' rule' grandchildren) (by simp)
-                    simp [validChildPair] at h_head
-                  exact False.elim h_false
-          | nonterm childN =>
-              cases child with
-              | Leaf b =>
-                  have h_false : False := by
-                    have h_head := h_valid
-                      (Symbol.nonterm childN, Leaf (cfg := cfg) b) (by simp)
-                    simp [validChildPair] at h_head
-                  exact False.elim h_false
-              | Node n' rule' grandchildren =>
-                  have h_child_valid_root :
-                      childN = n' ∧
-                        (Node (cfg := cfg) n' rule' grandchildren).Valid := by
-                    have h_head := h_valid
-                      (Symbol.nonterm childN,
-                        Node (cfg := cfg) n' rule' grandchildren) (by simp)
-                    simpa [validChildPair] using h_head
-                  obtain ⟨h_eq, h_child_valid⟩ := h_child_valid_root
-                  cases h_eq
-                  have h_child_input :
-                      input.toList =
-                        pre ++
-                          (Node (cfg := cfg) childN rule' grandchildren).leaves ++
-                          forestLeaves (cfg := cfg) tail ++ post := by
-                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc]
-                      using h_input
-                  have h_child_mem :
-                      Node (cfg := cfg) childN rule' grandchildren ∈
-                        (runParser (tag := tag cfg)
-                          (memoize counter (gen' (μ := List) cfg) childN)
-                          input pre.length).1.getD
-                          (pre.length +
-                            (Node (cfg := cfg) childN rule' grandchildren).leaves.length) [] := by
-                    exact h_recur
-                      (post' := forestLeaves (cfg := cfg) tail ++ post)
-                      (by simp) h_child_adm h_child_valid
-                      (by simpa [List.append_assoc] using h_child_input)
-                  have h_tail :=
-                    ih h_tail_adm' h_len_tail h_tail_valid h_input_tail h_recur_tail
-                  exact GeneratedChildWitness.nonterm h_child_mem
-                    (by
-                      simpa [forestLeaves, ParseTree.leaves, List.length_append, Nat.add_assoc]
-                        using h_tail)
+  (h_rule : rule ∈ cfg.rules n) :
+    ∃ pre suffix,
+      (cfg.rules n).attach.map (generatedRuleParser cfg recur n) =
+        pre ++ generatedRuleParser cfg recur n ⟨rule, h_rule⟩ :: suffix := by
+  have h_mem :
+      generatedRuleParser cfg recur n ⟨rule, h_rule⟩ ∈
+        (cfg.rules n).attach.map (generatedRuleParser cfg recur n) := by
+    exact List.mem_map.mpr ⟨⟨rule, h_rule⟩, by simp, rfl⟩
+  rcases list_split_of_mem h_mem with ⟨pre, suffix, h_split⟩
+  exact ⟨pre, suffix, h_split⟩
 
 set_option maxHeartbeats 1000000 in
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] in
-theorem gen_complete_of_admissible_tree_span
+theorem lower_gen'_complete_of_admissible_rule
+  {cfg : @CFG α ν}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  {n : ν} (rule : {rule // rule ∈ cfg.rules n})
+  {children : List (ParseTree cfg)}
+  {input : Array α} {memo : MemoData (tag cfg) List}
+  {seen : List (SpanVisit ν)} {pre post : List α}
+  (h_complete : memo_complete cfg input memo)
+  (h_adm :
+    AdmissibleForestWith cfg input seen counter children pre.length)
+  (h_valid : (Node (cfg := cfg) n rule children).Valid)
+  (h_input :
+    input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post)
+  (h_step :
+    ∀ n,
+      counter[n]? ≠ some 0 →
+      ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        memo_complete cfg input
+          (((memoizeStep counter g n
+            (fun fuel => memoize (counter.dec n fuel) g) start)
+            memo input).2.val))
+  (h_recur :
+    ∀ {memo : MemoData (tag cfg) List},
+      memo_complete cfg input memo →
+      ∀ {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
+        {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
+        Node (cfg := cfg) childN rule' grandchildren ∈ children →
+        AdmissibleTreeWith cfg input seen counter
+          (Node (cfg := cfg) childN rule' grandchildren) pre'.length →
+        (Node (cfg := cfg) childN rule' grandchildren).Valid →
+        input.toList =
+          pre' ++ (Node (cfg := cfg) childN rule' grandchildren).leaves ++ post' →
+        Node (cfg := cfg) childN rule' grandchildren ∈
+          (((memoize counter g childN).lower pre'.length) memo input).1.getD
+            (pre'.length +
+              (Node (cfg := cfg) childN rule' grandchildren).leaves.length) []) :
+    Node (cfg := cfg) n rule children ∈
+      (((gen' (μ := List) cfg (memoize counter g) n).lower pre.length)
+        memo input).1.getD
+        (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
+  obtain ⟨rulePrefix, suffix, h_split⟩ :=
+    generatedRuleParser_split_of_rule_mem
+      (cfg := cfg) (recur := memoize counter g) rule.property
+  have h_valid' :
+      rule.val.length = children.length ∧
+      ∀ pair, pair ∈ List.zip rule.val children →
+        validChildPair (cfg := cfg) pair := by
+    have h_node := by
+      simpa [ParseTree.Valid] using h_valid
+    constructor
+    · exact h_node.1
+    · intro pair h_pair
+      cases pair with
+      | mk sym subtree =>
+          have h_pair_valid := h_node.2 sym subtree h_pair
+          cases sym <;> cases subtree <;>
+            simp [validChildPair] at h_pair_valid ⊢ <;> assumption
+  have h_rulePrefix_memo :
+      lower_memo_complete cfg
+        (rulePrefix.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
+          (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)))
+        input := by
+    exact lower_memo_complete_of_foldl_sup
+      (cfg := cfg) (input := input)
+      rulePrefix
+      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))
+      (lower_failure_memo_complete cfg input)
+      (by
+        intro p h_p
+        have h_p_all :
+            p ∈ (cfg.rules n).attach.map
+              (generatedRuleParser cfg (memoize counter g) n) := by
+          rw [h_split]
+          simp [h_p]
+        rw [List.mem_map] at h_p_all
+        rcases h_p_all with ⟨rule', _h_rule_mem, rfl⟩
+        simpa [generatedRuleParser, generatedSymbolParser,
+          generatedListSymbolParser] using
+          (lower_rule_branch_memo_complete_of_traverse
+            (cfg := cfg) (n := n) (rule := rule') (input := input)
+            (mkParser := generatedSymbolParser cfg (memoize counter g))
+            (by
+              simpa [generatedSymbolParser, generatedListSymbolParser] using
+                (lower_memo_complete_generated_traverse_memoize
+                  (cfg := cfg) counter g rule'.val input h_step))))
+  let prefixMemo : MemoData (tag cfg) List :=
+    ↑((((rulePrefix.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
+      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower pre.length)
+      memo input).2)
+  have h_rulePrefix_complete :
+      memo_complete cfg input prefixMemo := by
+    intro n' counter' pre' post' seen' tree' resultMap' h_cache h_root
+      h_adm' h_valid_tree h_input_tree
+    exact (h_rulePrefix_memo memo h_complete pre.length)
+      (by simpa [prefixMemo] using h_cache)
+      h_root h_adm' h_valid_tree h_input_tree
+  have h_children :
+      children ∈
+        (((List.traverse id
+          (rule.val.map (generatedSymbolParser cfg (memoize counter g)))).lower
+          pre.length) prefixMemo input).1.getD
+          (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
+    simpa [generatedSymbolParser, generatedListSymbolParser] using
+      (lower_generated_traverse_complete_of_admissible_valid_pairs
+        (cfg := cfg) counter g
+        (rule := rule.val) (children := children)
+        (input := input) (memo := prefixMemo)
+        (seen := seen) (pre := pre) (post := post)
+        h_rulePrefix_complete h_adm h_valid'.1 h_valid'.2 h_input
+        h_step h_recur)
+  have h_fold :=
+    lower_gen'_rule_complete_after_split
+      (cfg := cfg) (recur := memoize counter g)
+      (n := n) (rule := rule.val) rule.property
+      (pre := rulePrefix) (suffix := suffix)
+      (memo := memo) (input := input)
+      (start := pre.length)
+      (end_ := pre.length + (forestLeaves (cfg := cfg) children).length)
+      (subtrees := children)
+      h_split
+      (by simpa [prefixMemo] using h_children)
+  simpa [leaves_node_eq_forestLeaves] using h_fold
+
+set_option maxHeartbeats 1000000 in
+theorem resultMap_complete_lower_gen'_memoized_body
   {cfg : @CFG α ν} {input : Array α}
-  {tree : ParseTree cfg} {seen : List (SpanVisit ν)}
-  {counter : Counter ν} {n : ν} {pre post : List α}
-  (h_root : tree.root = Symbol.nonterm n)
-  (h_adm : AdmissibleTreeWith cfg input seen counter tree pre.length)
-  (h_valid : tree.Valid)
-  (h_input : input.toList = pre ++ tree.leaves ++ post) :
-    tree ∈
-      (runParser (tag := tag cfg)
-        (memoize counter (gen' (μ := List) cfg) n)
-        input pre.length).1.getD
-        (pre.length + tree.leaves.length) [] := by
-  revert seen counter n pre post h_root h_adm h_valid h_input
-  refine ((measure (fun tree : ParseTree cfg => sizeOf tree)).wf).induction
-    (C := fun tree =>
-      ∀ {seen : List (SpanVisit ν)} {counter : Counter ν}
-        {n : ν} {pre post : List α},
-        tree.root = Symbol.nonterm n →
-        AdmissibleTreeWith cfg input seen counter tree pre.length →
-        tree.Valid →
-        input.toList = pre ++ tree.leaves ++ post →
-        tree ∈
-          (runParser (tag := tag cfg)
-            (memoize counter (gen' (μ := List) cfg) n)
-            input pre.length).1.getD
-            (pre.length + tree.leaves.length) [])
-    tree ?_
-  intro tree ih seen counter n pre post h_root h_adm h_valid h_input
+  {counter : Counter ν} {n : ν}
+  {memo : MemoData (tag cfg) List} {start : ℕ}
+  (h_complete : memo_complete cfg input memo)
+  (h_step :
+    ∀ childN,
+      (counter.dec n (input.size - start + 1))[childN]? ≠ some 0 →
+      ∀ start',
+      ∀ memo' : MemoData (tag cfg) List,
+        memo_complete cfg input memo' →
+        memo_complete cfg input
+          (((memoizeStep (counter.dec n (input.size - start + 1))
+            (gen' (μ := List) cfg) childN
+            (fun fuel =>
+              memoize
+                ((counter.dec n (input.size - start + 1)).dec childN fuel)
+                (gen' (μ := List) cfg))
+            start') memo' input).2.val))
+  (h_recur :
+    ∀ {memo' : MemoData (tag cfg) List},
+      memo_complete cfg input memo' →
+      ∀ {seen' : List (SpanVisit ν)}
+        {childN : ν} {rule' : {rule // rule ∈ cfg.rules childN}}
+        {grandchildren : List (ParseTree cfg)} {pre' post' : List α},
+        AdmissibleTreeWith cfg input seen'
+          (counter.dec n (input.size - start + 1))
+          (Node (cfg := cfg) childN rule' grandchildren) pre'.length →
+        (Node (cfg := cfg) childN rule' grandchildren).Valid →
+        input.toList =
+          pre' ++ (Node (cfg := cfg) childN rule' grandchildren).leaves ++ post' →
+        Node (cfg := cfg) childN rule' grandchildren ∈
+          (((memoize (counter.dec n (input.size - start + 1))
+              (gen' (μ := List) cfg) childN).lower pre'.length)
+            memo' input).1.getD
+            (pre'.length +
+              (Node (cfg := cfg) childN rule' grandchildren).leaves.length) []) :
+    resultMap_complete cfg input n (Counter.toKey counter) start
+      ((((gen' (μ := List) cfg
+          (memoize (counter.dec n (input.size - start + 1))
+            (gen' (μ := List) cfg)) n).lower start) memo input).1) := by
+  intro counter' pre post seen tree h_key h_start h_root h_adm h_valid h_input
+  subst start
   cases tree with
   | Leaf a =>
       simp at h_root
@@ -7847,110 +8884,278 @@ theorem gen_complete_of_admissible_tree_span
       have h_n : n' = n := by
         simpa using h_root
       cases h_n
-      obtain ⟨_h_no_cycle, h_budget, h_children_adm⟩ :=
+      obtain ⟨_h_no_cycle, _h_budget, h_children_adm⟩ :=
         admissible_node_inv (cfg := cfg) h_adm
-      have h_valid_node := by
-        simpa [ParseTree.Valid] using h_valid
-      have h_valid' :
-          rule.val.length = children.length ∧
-          ∀ pair, pair ∈ List.zip rule.val children →
-            validChildPair (cfg := cfg) pair := by
-        constructor
-        · exact h_valid_node.1
-        · intro pair h_pair
-          cases pair with
-          | mk sym subtree =>
-              have h_pair_valid := h_valid_node.2 sym subtree h_pair
-              cases sym <;> cases subtree <;>
-                simp [validChildPair] at h_pair_valid ⊢ <;> assumption
+      have h_counter_lookup :
+          ∀ t : ν, counter'[t]? = counter[t]? := by
+        intro t
+        exact counter_getElem?_eq_of_toKey_eq
+          (left := counter') (right := counter) h_key t
+      have h_children_adm_key :
+          AdmissibleForestWith cfg input
+            (nodeSpanVisit n pre.length
+              (Node (cfg := cfg) n rule children) :: seen)
+            (counter.dec n (input.size - pre.length + 1))
+            children pre.length := by
+        refine admissibleForestWith_congr_counter_getElem?
+          (cfg := cfg) (input := input)
+          (left := counter'.dec n (input.size - pre.length + 1))
+          (right := counter.dec n (input.size - pre.length + 1))
+          ?_ h_children_adm
+        intro t
+        exact counter_dec_getElem?_eq_of_getElem?_eq
+          (left := counter') (right := counter)
+          h_counter_lookup n t (input.size - pre.length + 1)
+      have h_children_adm_body :
+          AdmissibleForestWith cfg input
+            (nodeSpanVisit n pre.length
+              (Node (cfg := cfg) n rule children) :: seen)
+            (counter.dec n (input.size - pre.length + 1))
+            children pre.length := by
+        exact h_children_adm_key
       have h_forest_input :
           input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post := by
         simpa [leaves_node_eq_forestLeaves] using h_input
-      let childCounter := counter.dec n (input.size - pre.length + 1)
-      have h_child_witness :
-          GeneratedChildWitness cfg
-            (memoize childCounter (gen' (μ := List) cfg))
-            input rule.val children pre.length
-            (pre.length + (forestLeaves (cfg := cfg) children).length) := by
-        apply generatedChildWitness_of_admissible_valid_pairs
-          (cfg := cfg) (input := input)
+      have h_node_valid :
+          (Node (cfg := cfg) n rule children).Valid := by
+        simpa using h_valid
+      simpa [leaves_node_eq_forestLeaves] using
+        (lower_gen'_complete_of_admissible_rule
+          (cfg := cfg)
+          (counter := counter.dec n (input.size - pre.length + 1))
+          (g := gen' (μ := List) cfg)
+          (n := n) (rule := rule)
+          (children := children)
+          (input := input) (memo := memo)
           (seen :=
             nodeSpanVisit n pre.length
               (Node (cfg := cfg) n rule children) :: seen)
-          (counter := childCounter)
-          (rule := rule.val) (children := children)
           (pre := pre) (post := post)
-        · simpa [childCounter] using h_children_adm
-        · exact h_valid'.1
-        · exact h_valid'.2
-        · exact h_forest_input
-        · intro childN rule' grandchildren pre' post' h_mem_child
-            h_child_adm h_child_valid h_child_input
-          have h_lt :
-              sizeOf (Node (cfg := cfg) childN rule' grandchildren) <
-                sizeOf (Node (cfg := cfg) n rule children) := by
-            exact ParseTree.sizeOf_lt_of_child
-              (parent := Node (cfg := cfg) n rule children)
-              (child := Node (cfg := cfg) childN rule' grandchildren)
-              h_mem_child
-          exact ih (Node (cfg := cfg) childN rule' grandchildren) h_lt
-            (seen :=
-              nodeSpanVisit n pre.length
-                (Node (cfg := cfg) n rule children) :: seen)
-            (counter := childCounter)
-            (n := childN) (pre := pre') (post := post') rfl
-            h_child_adm h_child_valid h_child_input
-      have h_body :
-          Node (cfg := cfg) n rule children ∈
-            (runParser (tag := tag cfg)
-              (gen' (μ := List) cfg
-                (memoize childCounter (gen' (μ := List) cfg)) n)
-              input pre.length).1.getD
-              (pre.length + (Node (cfg := cfg) n rule children).leaves.length) [] := by
-        have h_branch := gen'_rule_complete_of_child_witness
-          (cfg := cfg)
-          (recur := memoize childCounter (gen' (μ := List) cfg))
-          (n := n) (rule := rule.val) rule.property
-          (input := input) (start := pre.length)
-          (end_ := pre.length + (forestLeaves (cfg := cfg) children).length)
-          (subtrees := children) h_child_witness
-        simpa [leaves_node_eq_forestLeaves] using h_branch
-      exact mem_memoize_startState_of_body_mem
-        (tag := tag cfg) (β := α)
-        (counter := counter)
-        (g := gen' (μ := List) cfg)
-        (t := n) (input := input) (start := pre.length)
-        (end_pos := pre.length +
-          (Node (cfg := cfg) n rule children).leaves.length)
-        (x := Node (cfg := cfg) n rule children)
-        h_budget
-        (by simpa [childCounter] using h_body)
+          h_complete h_children_adm_body h_node_valid h_forest_input
+          h_step
+          (by
+            intro memo' h_memo childN rule' grandchildren pre' post'
+              h_child_mem h_child_adm h_child_valid h_child_input
+            exact h_recur h_memo h_child_adm h_child_valid h_child_input))
 
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] in
-theorem gen_complete_of_admissible_node_span
-  {cfg : @CFG α ν} {input : Array α}
-  {seen : List (SpanVisit ν)} {counter : Counter ν}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
-  {children : List (ParseTree cfg)} {pre post : List α}
-  (h_adm :
-    AdmissibleTreeWith cfg input seen counter
-      (Node (cfg := cfg) n rule children) pre.length)
-  (h_valid : (Node (cfg := cfg) n rule children).Valid)
-  (h_input :
-    input.toList =
-      pre ++ (Node (cfg := cfg) n rule children).leaves ++ post) :
-    Node (cfg := cfg) n rule children ∈
-      (runParser (tag := tag cfg)
-        (memoize counter (gen' (μ := List) cfg) n)
-        input pre.length).1.getD
-        (pre.length +
-          (Node (cfg := cfg) n rule children).leaves.length) [] := by
-  exact gen_complete_of_admissible_tree_span
-    (cfg := cfg) (input := input)
-    (tree := Node (cfg := cfg) n rule children)
-    (seen := seen) (counter := counter) (n := n)
-    (pre := pre) (post := post)
-    rfl h_adm h_valid h_input
+set_option maxHeartbeats 2000000 in
+theorem memoized_gen_complete_invariant
+  (cfg : @CFG α ν) (input : Array α) :
+    (∀ n,
+      lower_memo_complete cfg
+        (memoize (Counter.empty : Counter ν) (gen' (μ := List) cfg) n)
+        input) ∧
+    (∀ {n : ν} {memo : MemoData (tag cfg) List}
+      {pre post : List α} {seen : List (SpanVisit ν)}
+      {tree : ParseTree cfg},
+      memo_complete cfg input memo →
+      tree.root = Symbol.nonterm n →
+      AdmissibleTreeWith cfg input seen (Counter.empty : Counter ν) tree
+        pre.length →
+      tree.Valid →
+      input.toList = pre ++ tree.leaves ++ post →
+      tree ∈
+        (((memoize (Counter.empty : Counter ν) (gen' (μ := List) cfg) n).lower
+          pre.length) memo input).1.getD
+          (pre.length + tree.leaves.length) []) := by
+  let p (counter : Counter ν)
+      (parser : (n : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) :=
+    (∀ n, lower_memo_complete cfg (parser n) input) ∧
+    (∀ n,
+      counter[n]? ≠ some 0 →
+      ∀ memo : MemoData (tag cfg) List,
+        memo_complete cfg input memo →
+        ∀ start : ℕ,
+        ∀ _h_no_cache :
+          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+          memo_complete cfg input
+              ((((gen' (μ := List) cfg
+                  (memoize (counter.dec n (input.size - start + 1))
+                    (gen' (μ := List) cfg))
+                  n).lower start)
+                memo input).2.val) ∧
+            resultMap_complete cfg input n (Counter.toKey counter) start
+              ((((gen' (μ := List) cfg
+                  (memoize (counter.dec n (input.size - start + 1))
+                    (gen' (μ := List) cfg))
+                  n).lower start)
+                memo input).1)) ∧
+    (∀ {n : ν} {memo : MemoData (tag cfg) List}
+      {pre post : List α} {seen : List (SpanVisit ν)}
+      {tree : ParseTree cfg},
+      memo_complete cfg input memo →
+      tree.root = Symbol.nonterm n →
+      AdmissibleTreeWith cfg input seen counter tree pre.length →
+      tree.Valid →
+      input.toList = pre ++ tree.leaves ++ post →
+      tree ∈
+        (((parser n).lower pre.length) memo input).1.getD
+          (pre.length + tree.leaves.length) [])
+  have h_all : p (Counter.empty : Counter ν)
+      (memoize (g := gen' (μ := List) cfg)) := by
+    refine memoize_counter_induction (g := gen' (μ := List) cfg) p ?_
+    intro counter h_ind
+    have h_body_current :
+        ∀ n,
+          counter[n]? ≠ some 0 →
+          ∀ memo : MemoData (tag cfg) List,
+            memo_complete cfg input memo →
+            ∀ start : ℕ,
+            ∀ _h_no_cache :
+              (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+              memo_complete cfg input
+                  ((((gen' (μ := List) cfg
+                      (memoize (counter.dec n (input.size - start + 1))
+                        (gen' (μ := List) cfg))
+                      n).lower start)
+                    memo input).2.val) ∧
+                resultMap_complete cfg input n (Counter.toKey counter) start
+                  ((((gen' (μ := List) cfg
+                      (memoize (counter.dec n (input.size - start + 1))
+                        (gen' (μ := List) cfg))
+                      n).lower start)
+                    memo input).1) := by
+      intro current h_counter memo h_memo start h_no_cache
+      let childCounter : Counter ν :=
+        counter.dec current (input.size - start + 1)
+      have h_child : p childCounter
+          (memoize (g := gen' (μ := List) cfg) childCounter) := by
+        simpa [childCounter] using
+          h_ind current (input.size - start + 1) h_counter
+      have h_step_guard :
+          ∀ childN,
+            childCounter[childN]? ≠ some 0 →
+            ∀ start',
+            ∀ memo' : MemoData (tag cfg) List,
+              memo_complete cfg input memo' →
+              memo_complete cfg input
+                (((memoizeStep childCounter (gen' (μ := List) cfg) childN
+                  (fun fuel => memoize (childCounter.dec childN fuel)
+                    (gen' (μ := List) cfg))
+                  start') memo' input).2.val) := by
+        intro childN h_child_counter start' memo' h_memo'
+        exact memo_complete_memoizeStep
+          (cfg := cfg) (input := input)
+          (counter := childCounter)
+          (g := gen' (μ := List) cfg)
+          (next := fun fuel =>
+            memoize (childCounter.dec childN fuel) (gen' (μ := List) cfg))
+          (n := childN) (memo := memo') (start := start')
+          h_memo'
+          (fun h_no_cache' =>
+            (h_child.2.1 childN h_child_counter memo' h_memo' start'
+              h_no_cache'))
+      have h_body_memo :
+          lower_memo_complete cfg
+            (gen' (μ := List) cfg
+              (memoize childCounter (gen' (μ := List) cfg)) current)
+            input := by
+        exact lower_gen'_memo_complete_of_rules
+          (cfg := cfg) (input := input)
+          (recur := memoize childCounter (gen' (μ := List) cfg))
+          current
+          (by
+            intro rule
+            exact lower_rule_branch_memo_complete_of_traverse
+              (cfg := cfg) (n := current) (rule := rule) (input := input)
+              (by
+                simpa [generatedSymbolParser, generatedListSymbolParser] using
+                  (lower_memo_complete_generated_traverse_memoize
+                    (cfg := cfg) childCounter (gen' (μ := List) cfg)
+                    rule.val input h_step_guard)))
+      have h_body_result :
+          resultMap_complete cfg input current (Counter.toKey counter) start
+            ((((gen' (μ := List) cfg
+                (memoize childCounter (gen' (μ := List) cfg)) current).lower
+              start) memo input).1) := by
+        intro counter' pre post seen tree h_key h_start h_root h_adm h_valid
+          h_input
+        have h_raw :
+            resultMap_complete cfg input current (Counter.toKey counter) start
+              ((((gen' (μ := List) cfg
+                  (memoize (counter.dec current (input.size - start + 1))
+                    (gen' (μ := List) cfg)) current).lower start)
+                memo input).1) :=
+          resultMap_complete_lower_gen'_memoized_body
+            (cfg := cfg) (input := input)
+            (counter := counter) (n := current)
+            (memo := memo) (start := start)
+            h_memo
+            (by
+              intro childN h_child_counter start' memo' h_memo'
+              have h_child_counter' :
+                  childCounter[childN]? ≠ some 0 := by
+                simpa [childCounter] using h_child_counter
+              change memo_complete cfg input
+                (((memoizeStep childCounter (gen' (μ := List) cfg) childN
+                  (fun fuel => memoize (childCounter.dec childN fuel)
+                    (gen' (μ := List) cfg))
+                  start') memo' input).2.val)
+              exact h_step_guard childN h_child_counter' start' memo' h_memo')
+            (by
+              intro memo' h_memo' seen' childN rule grandchildren pre post
+                h_adm h_valid h_input
+              exact h_child.2.2
+                (n := childN) (memo := memo')
+                (pre := pre) (post := post) (seen := seen')
+                (tree := Node (cfg := cfg) childN rule grandchildren)
+                h_memo' rfl h_adm h_valid h_input)
+        simpa [childCounter] using
+          h_raw h_key h_start h_root h_adm h_valid h_input
+      constructor
+      · intro n' counter' pre post seen tree resultMap h_cache h_root h_adm
+          h_valid h_input
+        have h_body_memo' :
+            memo_complete cfg input
+              ((((gen' (μ := List) cfg
+                  (memoize childCounter (gen' (μ := List) cfg)) current).lower
+                start) memo input).2.val) :=
+          h_body_memo memo h_memo start
+        simpa [childCounter] using
+          h_body_memo' h_cache h_root h_adm h_valid h_input
+      · intro counter' pre post seen tree h_key h_start h_root h_adm h_valid
+          h_input
+        simpa [childCounter] using
+          h_body_result h_key h_start h_root h_adm h_valid h_input
+    constructor
+    · intro current
+      by_cases h_counter : counter[current]? = some 0
+      · simpa [memoize, h_counter] using
+          lower_failure_memo_complete cfg input
+      · exact lower_memo_complete_memoize
+          (cfg := cfg) (input := input)
+          (counter := counter) (g := gen' (μ := List) cfg)
+          (n := current)
+          (by
+            intro memo h_memo start h_no_cache
+            exact h_body_current current h_counter memo h_memo start
+              h_no_cache)
+    constructor
+    · exact h_body_current
+    · intro current memo pre post seen tree h_memo h_root h_adm h_valid h_input
+      cases tree with
+      | Leaf a =>
+          simp at h_root
+      | Node n' rule children =>
+          have h_n : n' = current := by
+            simpa using h_root
+          cases h_n
+          obtain ⟨_h_no_cycle, h_budget, _h_children_adm⟩ :=
+            admissible_node_inv (cfg := cfg) h_adm
+          exact mem_lower_memoize_of_body_or_cache_complete
+            (cfg := cfg) (input := input)
+            counter (gen' (μ := List) cfg)
+            (n := current) (memo := memo)
+            (pre := pre) (post := post) (seen := seen)
+            (tree := Node (cfg := cfg) current rule children)
+            h_budget h_memo rfl h_adm h_valid h_input
+            (by
+              intro h_no_cache
+              exact (h_body_current current h_budget memo h_memo pre.length
+                h_no_cache).2 rfl rfl rfl h_adm h_valid h_input)
+  constructor
+  · exact h_all.1
+  · exact h_all.2.2
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] in
 theorem gen_complete_exists_of_admissible_valid_tree
@@ -7969,12 +9174,16 @@ theorem gen_complete_exists_of_admissible_valid_tree
   have h_input :
       input.toList = [] ++ tree.leaves ++ [] := by
     simp [h_leaves]
-  have h_mem := gen_complete_of_admissible_tree_span
-    (cfg := cfg) (input := input) (tree := tree)
-    (seen := []) (counter := (Counter.empty : Counter ν))
-    (n := n) (pre := []) (post := [])
-    h_root h_adm h_valid h_input
+  have h_mem :=
+    (memoized_gen_complete_invariant cfg input).2
+      (n := n)
+      (memo := (startState : MemoData (tag cfg) List))
+      (pre := []) (post := []) (seen := [])
+      (tree := tree)
+      (memo_complete_empty cfg input)
+      h_root h_adm h_valid h_input
   unfold gen
+  rw [runParser_fst_eq_lower]
   simpa [h_leaves] using h_mem
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [Hashable ν] [Fintype ν] in
