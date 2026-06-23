@@ -6,6 +6,9 @@ Verified parser combinator experiments in Lean 4.  The core contribution is to
 provide memoizing parser combinators that can capture context-free languages,
 and can be mapped 1:1 to grammars with no restrictions.
 
+Copyright Madison Kuriny, Mehmet Emre. The code in this repository is licensed
+under Apache License 2.0 (see LICENSE).
+
 ## Structure of the code
 
 The module structure under `ParserCombinators` is below.
