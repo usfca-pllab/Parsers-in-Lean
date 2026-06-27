@@ -1,136 +1,189 @@
 # TASKS
 
-This file tracks only the active path to the overall goal: remove the remaining
-proof assumptions from the verified memoizing parser-combinator core while
-preserving exact-counter memoization.
+This file tracks the active proof-simplification path for
+`ParserCombinators/Gen.lean` and `ParserCombinators/Lemmas.lean`.
 
-Detailed proof history, completed helper layers, old tactical TODOs, and audit
-snapshots live in `TASKS-trace.md`.  Statement refinements live in
-`refinements.md`.  Broader design ideas live in `future-work.md` and
-`memo-strategies.md`.
+The current proof is complete, but the main files are still large.  The goal is
+proof compression only: preserve the executable parser generator and the
+exact-counter memoization design while reducing duplicated proof plumbing.
+
+## Guardrails
+
+- Do not change `gen`, `memoize`, `gen_sound`, `gen_complete`, or
+  `gen_correct`.
+- Keep `memo_complete` exact-keyed and central.  Cache completeness must remain
+  tied to `(Counter.toKey counter, start)`.
+- Do not introduce counter subsumption, dominance reuse, same-tag/start reuse,
+  proof-only recomputation, chart parsing, or a worklist parser.
+- Avoid building a broad parser algebra library.  Add only abstractions needed
+  by live generated-parser proof obligations.
+- Keep raw implementation details such as `prePairs`, `preValues`, quotient
+  transport, and `DHashMap` case splits behind narrow semantic lemmas.
+- Run `lake build` after each implemented phase.
 
 ## Definition Of Done
 
-- [x] No active `axiom` or `sorry` remains in:
-  `ParserCombinators/Gen.lean`, `ParserCombinators/Lemmas.lean`,
-  `ParserCombinators/Memoized.lean`, or `ParserCombinators/CFG.lean`.
-- [x] `gen_sound`, `gen_complete`, and `gen_correct` build against the real
-  exact-counter `memoize` implementation.
-- [x] `memoize` still reuses exact-counter cache entries; no proof-only
-  recomputation path replaces memoization.
-- [x] `lake build` succeeds.
-- [x] The final audit commands below report no live dependencies on retired
-  axiom names.
+- [ ] `lake build` succeeds.
+- [ ] `rg -n "\\baxiom\\b|\\bsorry\\b" ParserCombinators` returns no matches.
+- [ ] `gen_sound`, `gen_complete`, and `gen_correct` theorem statements are
+  unchanged.
+- [ ] `gen` and `memoize` definitions are unchanged.
+- [ ] `ParserCombinators/Gen.lean` and `ParserCombinators/Lemmas.lean` have a
+  meaningful net line-count reduction.
+- [ ] Exact-counter cache reuse remains visibly enforced in the completeness
+  path.
 
-## Compact Proof Path
+## Plan
 
-The remaining proof work should stay compact.  Do not build a broad parser
-algebra library or duplicate generic sound/bounded/complete variants unless a
-live downstream proof needs them.
+### 1. Add A Narrow State-Preservation Core
 
-Goal constraint: the final proof should be a small generated-parser
-completeness argument over the existing exact-counter memoization invariant,
-not a large collection of near-duplicate helper families.  Prefer one named
-semantic lemma at each real boundary over repeated inlining of parser
-definitions inside the main theorem.
+Introduce local abbreviations for state preservation through parser execution:
 
-Preferred route:
+```lean
+ActionPreserves Inv act :=
+  ∀ memo, Inv memo → Inv ((act memo input).2.val)
 
-- Keep the exact-counter `memo_complete` cache-coherence layer as the only
-  memo-completeness invariant unless a concrete proof obligation forces a
-  sharper local predicate.
-- Add one lower-state generated-parser completeness theorem: from
-  `memo_complete cfg input memo` and an admissible valid tree over the current
-  span, running the generated parser under `memo` contains that tree.
-- Instantiate that theorem at `startState` using `memo_complete_empty` in the
-  public `gen_complete_exists` / `gen_complete` path.
-- Delete or stop using stale fresh-state helpers instead of preserving old
-  names with restated meanings.
-- Use existing exact-prefix/lower-state bind and after-left/lower-state choice
-  lemmas; avoid proving broad generic equivalences for all `ParserM`.
+ParserPreserves Inv p :=
+  ∀ start, ActionPreserves Inv (p start)
 
-Compactness criteria:
-
-- [x] The final replacement for the bind/traverse axiom is generated-parser
-  specific or exact-prefix/lower-state specific, not a broad fresh-state bind
-  equivalence.
-- [x] The final replacement for the sup/choice axiom is after-left or
-  lower-state specific, not a broad fresh-state choice equivalence.
-- [x] The proof avoids repetitive inlining of `gen'`, `memoizeStep`, and
-  parser combinator internals when a named local helper would expose the needed
-  fact more directly.
-- [x] New helper lemmas are merged, deleted, or kept private unless they remove
-  real duplication or encode a reusable proof boundary.
-- [x] The final `Gen.lean` changes read as one coherent proof path: no
-  parallel theorem families, compatibility wrappers, or preserved stale helper
-  routes remain unless they are still used by a live proof obligation.
-
-## Active Work
-
-### 1. Remove The Bind/Traverse Axiom
-
-Status: complete.
-
-Retired assumption:
-
-- `ParserCombinators/Lemmas.lean`: `mem_runParser_bind_iff_eq_bind_mem_runParser`
-
-Retired dependency:
-
-- `ParserCombinators/Gen.lean`: `runParser_traverse_complete_cons`
-
-Completed work:
-
-- [x] Replace the fresh-state traversal completeness path with a lower-state or
-  exact-prefix traversal theorem that threads the memo state produced by the
-  head parser and earlier traversal actions.
-- [x] Refactor the remaining Gen traversal consumer to use the state-threaded
-  theorem.
-- [x] Keep this replacement compact: factor repeated terminal/lift/failure or
-  bind-state plumbing into named local helpers only where it removes duplicated
-  proof logic.
-- [x] Delete `mem_runParser_bind_iff_eq_bind_mem_runParser`.
-
-### 2. Remove The Sup/Choice Axiom
-
-Status: complete.
-
-Retired assumption:
-
-- `ParserCombinators/Lemmas.lean`: `runParser_sup_eq_sup_runParser`
-
-Retired dependency:
-
-- `ParserCombinators/Gen.lean`: `complete_of_sup_right`
-
-Completed work:
-
-- [x] Replace the fresh-state right-choice completeness path with an after-left
-  or lower-state theorem that accounts for the memo state produced by the left
-  branch.
-- [x] Refactor generated-rule fold completeness to use the state-threaded
-  choice theorem.
-- [x] Keep this replacement compact: avoid a generic parser-choice algebra
-  layer unless the generated-rule fold proof genuinely needs that exact
-  abstraction.
-- [x] Delete `runParser_sup_eq_sup_runParser`.
-
-## Next Proof Step
-
-- [x] Finish the exact-counter cache-completeness invariant for generated
-  parsers:
-  `positionMap_complete`, whole-memo union preservation, and the
-  `memoizeStep` compute branch.
-- [x] Thread that invariant through lower-state generated-parser completeness,
-  then use it to discharge the bind/traverse and sup/choice dependencies above.
-
-## Final Audit
-
-```sh
-rg -n "\\baxiom\\b|\\bsorry\\b" ParserCombinators/Gen.lean ParserCombinators/Lemmas.lean ParserCombinators/Memoized.lean ParserCombinators/CFG.lean
-rg -n "\\b(runParser_sup_eq_sup_runParser|mem_runParser_bind_iff_eq_bind_mem_runParser)\\b" ParserCombinators/Gen.lean ParserCombinators/Lemmas.lean
-lake build
+LowerPreserves Inv p :=
+  ∀ memo, Inv memo → ∀ start,
+    Inv (((p.lower start) memo input).2.val)
 ```
 
-Historical notes or explicitly retired `old_*` statement records are not active
-blockers, but no live proof should depend on retired axiom names.
+Prove only the live structural lemmas:
+
+- pure
+- `joinUnderCache`
+- traversable and list folds over `joinUnderCache`
+- `Parser.bind`
+- `ParserM.Bind`
+- `ParserM.lift`
+- map state preservation
+
+Instantiate this core for:
+
+- `Inv := memo_wellFormed cfg input`
+- `Inv := memo_complete cfg input`
+
+Then replace duplicated `memo_wellFormed` / `memo_complete` state-threading
+families where the generic lemmas apply directly.
+
+Do not start with generic `sup`, `orElse`, or arbitrary `foldl` theorem
+families.  Add those only if a live call site still needs them after the core
+is in place.
+
+### 2. Hide Bind Prefix Plumbing
+
+Keep the existing raw action-split lemma as an implementation detail, but add
+one semantic bind-origin lemma:
+
+```lean
+mem_lower_bind_exists_split_prefix_inv :
+  x ∈ (((ParserM.Bind p k).lower start) memo input).1.getD end_ [] →
+  Inv memo →
+  ParserPreserves Inv p →
+  (∀ a, LowerPreserves Inv (k a)) →
+  ∃ split a memoPrefix,
+    a ∈ ((p start) memo input).1.getD split [] ∧
+    Inv memoPrefix ∧
+    x ∈ (((k a).lower split) memoPrefix input).1.getD end_ []
+```
+
+Use it to replace downstream uses of:
+
+- `bind_action_prefix_memo_wellFormed`
+- `bind_action_prefix_memo_complete`
+- `mem_lower_bind_exists_action_split_wf`
+- `mem_lower_bind_exists_action_split_complete`
+
+The semantic lemma must keep the exact prefix memo witness needed by downstream
+soundness, boundedness, well-formedness, and completeness proofs.  It must not
+claim any broader parser equivalence.
+
+### 3. Add HashMap Transport Lemmas
+
+Constrain raw `Std.HashMap` and `Std.DHashMap` reasoning to a few semantic
+transport lemmas.
+
+Add narrow helpers for:
+
+- result-map membership/predicate preservation through `unionSup`
+- position-map completeness through `positionMapUnion`
+- whole-memo completeness through `left ⊔ right`
+
+Refactor these proofs to use the helpers:
+
+- `positionMap_complete_sup`
+- `positionMap_complete_of_memo_complete_sup`
+- `memo_complete_sup`
+
+After this phase, quotient/getD/DHashMap four-case reasoning should appear in
+the transport lemmas only.
+
+### 4. Factor Selected-Rule Completeness
+
+Extract the repeated selected-rule prefix/suffix proof pattern into one helper.
+
+The helper should:
+
+- split `(cfg.rules n).attach.map ...` into `rulePrefix`, selected rule, and
+  suffix
+- prove the prefix fold preserves `memo_complete`
+- define the exact `prefixMemo`
+- run selected rule traversal under `prefixMemo`
+- transport the selected branch result through the suffix fold
+
+Use this helper in:
+
+- `lower_gen'_complete_of_admissible_rule`
+- `resultMap_complete_lower_gen'_memoized_body`, if it still repeats selected
+  rule setup after the first refactor
+
+Keep selected rule identity and exact prefix memo visible in theorem
+statements.  Do not introduce a broad parser-choice fold library.
+
+### 5. Reassess Generated-Traverse Bundling
+
+Only after the earlier phases land, inspect whether these still duplicate
+substantial induction logic:
+
+- `lower_result_bounded_generated_traverse_memoize_guarded`
+- `lower_valid_pairs_generated_traverse_memoize_guarded`
+- `lower_generated_rule_branch_result_sound_bounded_memoize_guarded`
+
+If duplication remains high, consider one bundled generated-traverse theorem
+returning exactly the facts needed by generated-rule soundness:
+
+- bounds
+- valid child pairs
+- memo well-formed preservation
+
+Do not bundle completeness into this theorem.  Completeness remains on the
+separate exact-counter `memo_complete` path.
+
+### 6. Prune After References Disappear
+
+After `Gen.lean` is simplified, use `rg` to find unused helper names and remove
+stale wrappers.
+
+Likely low-risk cleanup:
+
+- remaining thin `runParser` mirrors whose lower-state versions are used
+  directly
+- duplicate local/list helpers, including `mem_bind_cons_map_exists_of_cons`
+  and `not_mem_bind_cons_map_nil` if both `Gen.lean` and `Lemmas.lean` still
+  define equivalent versions
+- stale compatibility wrappers created only to preserve old helper names
+
+Do not remove commented tests or TODO notes unless the underlying issue is
+actually resolved.
+
+## Audit Commands
+
+```sh
+lake build
+rg -n "\\baxiom\\b|\\bsorry\\b" ParserCombinators
+rg -n "theorem gen_sound|theorem gen_complete |theorem gen_correct" ParserCombinators/Gen.lean
+wc -l ParserCombinators/Lemmas.lean ParserCombinators/Gen.lean
+```
