@@ -2348,6 +2348,47 @@ theorem lower_memo_wellFormed_memoizeStep_lift
         h_memo
         (fun h_no_cache => h_compute memo h_memo start h_no_cache))
 
+set_option linter.unusedSectionVars false in
+theorem memo_wellFormed_memoizeStep_of_guarded_body
+  {cfg : @CFG α ν} {input : Array α}
+  (counter : Counter ν)
+  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
+      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
+  {n : ν}
+  (h_body :
+    ∀ memo : MemoData (tag cfg) List,
+      memo_wellFormed cfg input memo →
+      ∀ start : ℕ,
+      ∀ _h_no_cache :
+        (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+        memo_wellFormed cfg input
+            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
+                n).lower start)
+              memo input).2.val) ∧
+          resultMap_sound cfg n
+            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
+                n).lower start)
+              memo input).1) ∧
+          resultMap_bounded cfg input start
+            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
+                n).lower start)
+              memo input).1)) :
+    ∀ start,
+      ∀ memo : MemoData (tag cfg) List,
+        memo_wellFormed cfg input memo →
+        memo_wellFormed cfg input
+          (((memoizeStep counter g n
+            (fun fuel => memoize (counter.dec n fuel) g) start)
+            memo input).2.val) := by
+  intro start memo h_memo
+  exact memo_wellFormed_memoizeStep
+    (cfg := cfg) (input := input)
+    (counter := counter) (g := g)
+    (next := fun fuel => memoize (counter.dec n fuel) g)
+    (n := n) (memo := memo) (start := start)
+    h_memo
+    (fun h_no_cache => h_body memo h_memo start h_no_cache)
+
 omit [BEq α] [DecidableEq α] [DecidableEq ν] in
 lemma mem_zip_index_pair
   {xs : List α} {ys : List β}
@@ -5135,53 +5176,6 @@ theorem lower_memo_wellFormed_traverse_cons_memoize
         (tail := tail) (input := input)
         h_step h_tail
 
-set_option linter.unusedSectionVars false in
-theorem lower_memo_wellFormed_generated_traverse_memoize
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (rule : List (Symbol α ν)) (input : Array α)
-  (h_step :
-    ∀ n start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input
-          (((memoizeStep counter g n
-            (fun fuel => memoize (counter.dec n fuel) g) start)
-            memo input).2.val)) :
-    lower_memo_wellFormed cfg
-      (List.traverse id
-        (rule.map (generatedListSymbolParser cfg counter g)))
-      input := by
-  induction rule with
-  | nil =>
-      intro memo h_memo start
-      simpa [List.traverse, lower_return_snd_val_eq] using h_memo
-  | cons sym rest ih =>
-      cases sym with
-      | term a =>
-          change lower_memo_wellFormed cfg
-            (List.traverse id
-              ((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) ::
-                rest.map (generatedListSymbolParser cfg counter g)))
-            input
-          exact lower_memo_wellFormed_traverse_cons_terminal
-            (cfg := cfg) (a := a)
-            (tail := rest.map (generatedListSymbolParser cfg counter g))
-            (input := input) ih
-      | nonterm n =>
-          change lower_memo_wellFormed cfg
-            (List.traverse id
-              ((memoize counter g n) ::
-                rest.map (generatedListSymbolParser cfg counter g)))
-            input
-          exact lower_memo_wellFormed_traverse_cons_memoize
-            (cfg := cfg) (counter := counter) (g := g) (n := n)
-            (tail := rest.map (generatedListSymbolParser cfg counter g))
-            (input := input)
-            (h_step n) ih
-
 omit [Fintype ν] in
 theorem lower_memo_complete_traverse_cons_terminal
   {cfg : @CFG α ν}
@@ -7456,382 +7450,6 @@ theorem lower_memo_complete_memoize
         (n := n) h_compute
 
 set_option linter.unusedSectionVars false in
-theorem lower_result_bounded_generated_traverse_memoize
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (rule : List (Symbol α ν)) (input : Array α)
-  (h_step_bounds :
-    ∀ n,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          resultMap_bounded cfg input start
-            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                n).lower start)
-              memo input).1))
-  (h_step_memo :
-    ∀ n start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input
-          (((memoizeStep counter g n
-            (fun fuel => memoize (counter.dec n fuel) g) start)
-            memo input).2.val)) :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start end_ : ℕ,
-      start ≤ input.size →
-      ∀ result,
-        result ∈
-          (((List.traverse id
-            (rule.map (generatedListSymbolParser cfg counter g))).lower start)
-            memo input).1.getD end_ [] →
-        start ≤ end_ ∧ end_ ≤ input.size := by
-  induction rule with
-  | nil =>
-      intro memo _h_memo start end_ h_start result h_mem
-      have h_return := (mem_lower_return_iff
-        (tag := tag cfg) (β := α)
-        (a := ([] : List (ParseTree cfg))) (x := result)
-        (memo := memo) (input := input)
-        (start := start) (end_pos := end_)).mp (by
-          simpa [List.traverse] using h_mem)
-      cases h_return.1
-      exact ⟨le_rfl, h_start⟩
-  | cons sym rest ih =>
-      cases sym with
-      | term a =>
-          intro memo h_memo start end_ h_start result h_mem
-          cases result with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              have h_tail_memo :
-                  lower_memo_wellFormed cfg
-                    (List.traverse id
-                      (rest.map (generatedListSymbolParser cfg counter g)))
-                    input :=
-                lower_memo_wellFormed_generated_traverse_memoize
-                  (cfg := cfg) counter g rest input h_step_memo
-              obtain ⟨_h_head_eq, _h_head_mem, h_start_succ,
-                memo_tail, h_memo_tail, h_tail_mem⟩ :=
-                mem_lower_traverse_cons_terminal_exists_tail_wf
-                  (cfg := cfg) (a := a)
-                  (tail := rest.map (generatedListSymbolParser cfg counter g))
-                  (memo := memo) (input := input)
-                  (start := start) (end_ := end_)
-                  (result_head := result_head) (result_tail := result_tail)
-                  h_tail_memo h_memo
-                  (by simpa [generatedListSymbolParser] using h_mem)
-              have h_tail_bounds :=
-                ih memo_tail h_memo_tail (start + 1) end_
-                  h_start_succ result_tail h_tail_mem
-              exact ⟨Nat.le_trans (Nat.le_succ start) h_tail_bounds.1,
-                h_tail_bounds.2⟩
-      | nonterm n =>
-          intro memo h_memo start end_ h_start result h_mem
-          cases result with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (memoize counter g n) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              have h_tail_memo :
-                  lower_memo_wellFormed cfg
-                    (List.traverse id
-                      (rest.map (generatedListSymbolParser cfg counter g)))
-                    input :=
-                lower_memo_wellFormed_generated_traverse_memoize
-                  (cfg := cfg) counter g rest input h_step_memo
-              obtain ⟨split, memo_tail, h_memo_tail,
-                h_head_mem, h_tail_mem⟩ :=
-                mem_lower_traverse_cons_memoize_exists_head_tail_wf
-                  (cfg := cfg) counter g n
-                  (tail := rest.map (generatedListSymbolParser cfg counter g))
-                  (memo := memo) (input := input)
-                  (start := start) (end_ := end_)
-                  (result_head := result_head) (result_tail := result_tail)
-                  (by
-                    intro start memo h_memo
-                    exact h_step_memo n start memo h_memo)
-                  h_tail_memo h_memo
-                  (by simpa [generatedListSymbolParser] using h_mem)
-              have h_head_bounds :=
-                (lower_result_bounded_memoize
-                  (cfg := cfg) (input := input)
-                  counter g
-                  (n := n)
-                  (by
-                    intro memo h_memo start h_no_cache
-                    exact h_step_bounds n memo h_memo start h_no_cache))
-                  memo h_memo start split h_start result_head h_head_mem
-              have h_tail_bounds :=
-                ih memo_tail h_memo_tail split end_ h_head_bounds.2
-                  result_tail h_tail_mem
-              exact ⟨Nat.le_trans h_head_bounds.1 h_tail_bounds.1,
-                h_tail_bounds.2⟩
-
-set_option linter.unusedSectionVars false in
-theorem lower_valid_pairs_generated_traverse_memoize
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (rule : List (Symbol α ν)) (input : Array α)
-  (h_step_sound :
-    ∀ n,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          resultMap_sound cfg n
-            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                n).lower start)
-              memo input).1))
-  (h_step_memo :
-    ∀ n start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input
-          (((memoizeStep counter g n
-            (fun fuel => memoize (counter.dec n fuel) g) start)
-            memo input).2.val)) :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start end_ : ℕ,
-      ∀ subtrees,
-        subtrees ∈
-          (((List.traverse id
-            (rule.map (generatedListSymbolParser cfg counter g))).lower start)
-            memo input).1.getD end_ [] →
-        rule.length = subtrees.length ∧
-          ∀ pair, pair ∈ List.zip rule subtrees →
-            validChildPair (cfg := cfg) pair := by
-  induction rule with
-  | nil =>
-      intro memo _h_memo start end_ subtrees h_mem
-      have h_return := (mem_lower_return_iff
-        (tag := tag cfg) (β := α)
-        (a := ([] : List (ParseTree cfg))) (x := subtrees)
-        (memo := memo) (input := input)
-        (start := start) (end_pos := end_)).mp (by
-          simpa [List.traverse] using h_mem)
-      cases h_return.2
-      constructor
-      · simp
-      · intro pair h_pair
-        simp at h_pair
-  | cons sym rest ih =>
-      cases sym with
-      | term a =>
-          intro memo h_memo start end_ subtrees h_mem
-          cases subtrees with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              have h_tail_memo :
-                  lower_memo_wellFormed cfg
-                    (List.traverse id
-                      (rest.map (generatedListSymbolParser cfg counter g)))
-                    input :=
-                lower_memo_wellFormed_generated_traverse_memoize
-                  (cfg := cfg) counter g rest input h_step_memo
-              obtain ⟨h_head_eq, _h_head_mem, _h_start_succ,
-                memo_tail, h_memo_tail, h_tail_mem⟩ :=
-                mem_lower_traverse_cons_terminal_exists_tail_wf
-                  (cfg := cfg) (a := a)
-                  (tail := rest.map (generatedListSymbolParser cfg counter g))
-                  (memo := memo) (input := input)
-                  (start := start) (end_ := end_)
-                  (result_head := result_head) (result_tail := result_tail)
-                  h_tail_memo h_memo
-                  (by simpa [generatedListSymbolParser] using h_mem)
-              obtain ⟨h_tail_len, h_tail_pairs⟩ :=
-                ih memo_tail h_memo_tail (start + 1) end_
-                  result_tail h_tail_mem
-              constructor
-              · simp [h_tail_len]
-              · intro pair h_pair
-                simp at h_pair
-                cases h_pair with
-                | inl h_head_pair =>
-                    cases h_head_pair
-                    simp [validChildPair, h_head_eq]
-                | inr h_tail_pair =>
-                    exact h_tail_pairs pair h_tail_pair
-      | nonterm n =>
-          intro memo h_memo start end_ subtrees h_mem
-          cases subtrees with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (memoize counter g n) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              have h_tail_memo :
-                  lower_memo_wellFormed cfg
-                    (List.traverse id
-                      (rest.map (generatedListSymbolParser cfg counter g)))
-                    input :=
-                lower_memo_wellFormed_generated_traverse_memoize
-                  (cfg := cfg) counter g rest input h_step_memo
-              obtain ⟨split, memo_tail, h_memo_tail,
-                h_head_mem, h_tail_mem⟩ :=
-                mem_lower_traverse_cons_memoize_exists_head_tail_wf
-                  (cfg := cfg) counter g n
-                  (tail := rest.map (generatedListSymbolParser cfg counter g))
-                  (memo := memo) (input := input)
-                  (start := start) (end_ := end_)
-                  (result_head := result_head) (result_tail := result_tail)
-                  (by
-                    intro start memo h_memo
-                    exact h_step_memo n start memo h_memo)
-                  h_tail_memo h_memo
-                  (by simpa [generatedListSymbolParser] using h_mem)
-              have h_head_sound :=
-                (lower_result_sound_memoize
-                  (cfg := cfg) (input := input)
-                  counter g
-                  (n := n)
-                  (by
-                    intro memo h_memo start h_no_cache
-                    exact h_step_sound n memo h_memo start h_no_cache))
-                  memo h_memo start split result_head h_head_mem
-              obtain ⟨h_tail_len, h_tail_pairs⟩ :=
-                ih memo_tail h_memo_tail split end_
-                  result_tail h_tail_mem
-              constructor
-              · simp [h_tail_len]
-              · intro pair h_pair
-                simp at h_pair
-                cases h_pair with
-                | inl h_head_pair =>
-                    cases h_head_pair
-                    cases result_head with
-                    | Leaf b =>
-                        simp [ParseTree.root] at h_head_sound
-                    | Node n' rule' children' =>
-                        obtain ⟨h_valid, h_root⟩ := h_head_sound
-                        have h_eq : n = n' := by
-                          simpa [ParseTree.root] using h_root.symm
-                        exact ⟨h_eq, h_valid⟩
-                | inr h_tail_pair =>
-                    exact h_tail_pairs pair h_tail_pair
-
-set_option linter.unusedSectionVars false in
-theorem lower_generated_rule_branch_result_sound_bounded_memoize
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  {n : ν} (rule : {rule // rule ∈ cfg.rules n}) (input : Array α)
-  (h_step_sound :
-    ∀ n,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          resultMap_sound cfg n
-            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                n).lower start)
-              memo input).1))
-  (h_step_bounds :
-    ∀ n,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          resultMap_bounded cfg input start
-            ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                n).lower start)
-              memo input).1))
-  (h_step_memo :
-    ∀ n start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input
-          (((memoizeStep counter g n
-            (fun fuel => memoize (counter.dec n fuel) g) start)
-            memo input).2.val)) :
-    lower_result_sound cfg n
-        (Node n rule <$>
-          List.traverse id
-            (rule.val.map (generatedListSymbolParser cfg counter g))) input ∧
-      lower_result_bounded cfg
-        (Node n rule <$>
-          List.traverse id
-            (rule.val.map (generatedListSymbolParser cfg counter g))) input ∧
-      lower_memo_wellFormed cfg
-        (Node n rule <$>
-          List.traverse id
-            (rule.val.map (generatedListSymbolParser cfg counter g))) input := by
-  refine ⟨?_, ?_, ?_⟩
-  · exact lower_rule_branch_result_sound_of_traverse_pairs
-      (cfg := cfg) (n := n) (rule := rule)
-      (mkParser := generatedListSymbolParser cfg counter g)
-      (input := input)
-      (by
-        intro memo h_memo start end_ subtrees h_mem
-        exact lower_valid_pairs_generated_traverse_memoize
-          (cfg := cfg) counter g rule.val input
-          h_step_sound h_step_memo
-          memo h_memo start end_ subtrees h_mem)
-  · exact lower_rule_branch_result_bounded_of_traverse
-      (cfg := cfg) (n := n) (rule := rule)
-      (mkParser := generatedListSymbolParser cfg counter g)
-      (input := input)
-      (by
-        intro memo h_memo start end_ h_start subtrees h_mem
-        exact lower_result_bounded_generated_traverse_memoize
-          (cfg := cfg) counter g rule.val input
-          h_step_bounds h_step_memo
-          memo h_memo start end_ h_start subtrees h_mem)
-  · exact lower_rule_branch_memo_wellFormed_of_traverse
-      (cfg := cfg) (n := n) (rule := rule)
-      (mkParser := generatedListSymbolParser cfg counter g)
-      (input := input)
-      (lower_memo_wellFormed_generated_traverse_memoize
-        (cfg := cfg) counter g rule.val input h_step_memo)
-
-set_option linter.unusedSectionVars false in
 theorem lower_result_bounded_generated_traverse_memoize_guarded
   {cfg : @CFG α ν}
   (counter : Counter ν)
@@ -7878,14 +7496,12 @@ theorem lower_result_bounded_generated_traverse_memoize_guarded
             (((memoizeStep counter g n
               (fun fuel => memoize (counter.dec n fuel) g) start)
               memo input).2.val) := by
-    intro n h_counter start memo h_memo
-    exact memo_wellFormed_memoizeStep
+    intro n h_counter
+    exact memo_wellFormed_memoizeStep_of_guarded_body
       (cfg := cfg) (input := input)
-      (counter := counter) (g := g)
-      (next := fun fuel => memoize (counter.dec n fuel) g)
-      (n := n) (memo := memo) (start := start)
-      h_memo
-      (fun h_no_cache => h_body n h_counter memo h_memo start h_no_cache)
+      (counter := counter) (g := g) (n := n)
+      (fun memo h_memo start h_no_cache =>
+        h_body n h_counter memo h_memo start h_no_cache)
   induction rule with
   | nil =>
       intro memo _h_memo start end_ h_start result h_mem
@@ -8042,14 +7658,12 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
             (((memoizeStep counter g n
               (fun fuel => memoize (counter.dec n fuel) g) start)
               memo input).2.val) := by
-    intro n h_counter start memo h_memo
-    exact memo_wellFormed_memoizeStep
+    intro n h_counter
+    exact memo_wellFormed_memoizeStep_of_guarded_body
       (cfg := cfg) (input := input)
-      (counter := counter) (g := g)
-      (next := fun fuel => memoize (counter.dec n fuel) g)
-      (n := n) (memo := memo) (start := start)
-      h_memo
-      (fun h_no_cache => h_body n h_counter memo h_memo start h_no_cache)
+      (counter := counter) (g := g) (n := n)
+      (fun memo h_memo start h_no_cache =>
+        h_body n h_counter memo h_memo start h_no_cache)
   induction rule with
   | nil =>
       intro memo _h_memo start end_ subtrees h_mem
@@ -8233,14 +7847,12 @@ theorem lower_generated_rule_branch_result_sound_bounded_memoize_guarded
             (((memoizeStep counter g n
               (fun fuel => memoize (counter.dec n fuel) g) start)
               memo input).2.val) := by
-    intro n h_counter start memo h_memo
-    exact memo_wellFormed_memoizeStep
+    intro n h_counter
+    exact memo_wellFormed_memoizeStep_of_guarded_body
       (cfg := cfg) (input := input)
-      (counter := counter) (g := g)
-      (next := fun fuel => memoize (counter.dec n fuel) g)
-      (n := n) (memo := memo) (start := start)
-      h_memo
-      (fun h_no_cache => h_body n h_counter memo h_memo start h_no_cache)
+      (counter := counter) (g := g) (n := n)
+      (fun memo h_memo start h_no_cache =>
+        h_body n h_counter memo h_memo start h_no_cache)
   refine ⟨?_, ?_, ?_⟩
   · exact lower_rule_branch_result_sound_of_traverse_pairs
       (cfg := cfg) (n := n) (rule := rule)

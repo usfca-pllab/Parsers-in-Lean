@@ -182,22 +182,6 @@ theorem runParser_pure
     simp [h, h']
 
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
-theorem mem_runParser_pure_iff
-  (a x : α) (input : Array β) (start end_pos : ℕ)
-  : x ∈ (runParser (tag := tag) (μ := List) (pure a) input start).1.getD end_pos [] ↔
-      end_pos = start ∧ x = a := by
-  rw [Std.HashMap.getD_eq_getD_getElem?, runParser_pure]
-  by_cases h : end_pos = start <;> simp [h]
-
-omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
-theorem runParser_pure_getD
-  (a : α) (input : Array β) (start end_pos : ℕ)
-  : (runParser (tag := tag) (μ := List) (pure a) input start).1.getD end_pos [] =
-      if end_pos = start then [a] else [] := by
-  rw [Std.HashMap.getD_eq_getD_getElem?, runParser_pure]
-  by_cases h : end_pos = start <;> simp [h]
-
-omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
 theorem mem_lower_return_iff
   (a x : α) (memo : MemoData tag List) (input : Array β) (start end_pos : ℕ) :
     x ∈ (((ParserM.Return (tag := tag) (β := β) (μ := List) a).lower start)
@@ -366,14 +350,6 @@ theorem runParser_failure_getElem?_eq_none
     instMonadMStateT,
     hashMap_emptyWithCapacity_toList_eq_nil, List.map_nil, List.foldl_nil]
   change (Std.HashMap.emptyWithCapacity : Std.HashMap ℕ (μ α))[end_pos]? = none
-  simp
-
-omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
-theorem mem_runParser_failure_iff
-  (x : α) (input : Array β) (start end_pos : ℕ)
-  : x ∈ (runParser (tag := tag) (μ := List)
-        (⊥ : ParserM (tag := tag) β List α) input start).1.getD end_pos [] ↔ False := by
-  rw [Std.HashMap.getD_eq_getD_getElem?, runParser_failure_getElem?_eq_none]
   simp
 
 set_option linter.unusedSectionVars false in
@@ -3579,58 +3555,6 @@ theorem mem_lower_traverse_complete_cons_of_bind_getElem_action_mem
     (x := x :: xs)
     h_get h_value h_action
 
-set_option maxHeartbeats 1000000 in
-set_option linter.unusedSectionVars false in
-omit α [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] [DecidableEq α] in
-theorem mem_runParser_traverse_complete_cons_of_bind_getElem_action_mem
-  [DecidableEq α']
-  {δ : Type u}
-  (p : Parser (tag := tag) β List δ)
-  (k : δ → ParserM (tag := tag) β List α')
-  (tail : List (ParserM (tag := tag) β List α'))
-  (split : ℕ) (values : List δ) (a : δ)
-  (input : Array β)
-  (start end_pos : ℕ) (x : α') (xs : List α')
-  (h_get : ((p start) startState input).1[split]? = some values)
-  (h_value : a ∈ values)
-  (h_action :
-    ∀ prePairs postPairs preValues postValues,
-      ((p start) startState input).1.toList =
-        prePairs ++ (split, values) :: postPairs →
-      values = preValues ++ a :: postValues →
-      x :: xs ∈
-        (((k a >>= fun a => List.cons a <$> List.traverse id tail).lower split)
-          (↑((Traversable.foldl joinUnderCache
-            (List.foldl (Traversable.foldl joinUnderCache)
-              (pure Std.HashMap.emptyWithCapacity)
-              (List.map
-                (fun pair : ℕ × List δ =>
-                  match pair with
-                  | (j, values) =>
-                      List.map
-                        (fun a =>
-                          ((k a >>= fun a => List.cons a <$> List.traverse id tail).lower j))
-                        values)
-                prePairs))
-            (List.map
-              (fun a => ((k a >>= fun a => List.cons a <$> List.traverse id tail).lower split))
-              preValues))
-            (↑((p start) startState input).2) input).2)
-          input).1.getD end_pos []) :
-    x :: xs ∈
-      (runParser
-        (List.traverse id ((ParserM.Bind p k) :: tail))
-        input start).1.getD end_pos [] := by
-  rw [runParser_fst_eq_lower]
-  exact mem_lower_traverse_complete_cons_of_bind_getElem_action_mem
-    (tag := tag) (β := β)
-    (p := p) (k := k) (tail := tail)
-    (split := split) (values := values) (a := a)
-    (memo := startState) (input := input)
-    (start := start) (end_pos := end_pos)
-    (x := x) (xs := xs)
-    h_get h_value h_action
-
 set_option linter.unusedSectionVars false in
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
 theorem mem_bind_cons_map_exists_of_cons
@@ -3697,67 +3621,3 @@ theorem not_mem_bind_cons_map_nil
     (tail := tail) (head_result := head_result)
     (memo := startState) (input := input)
     (split := split) (end_pos := end_pos) h_mapped_getD
-
-omit [Fintype τ] in
-theorem runParser_traverse_preserves_length (xs: List (ParserM (tag := tag) β List α))
-  (start end_pos : ℕ)
-  (result : List α)
-  (h: result ∈ (runParser (List.traverse id xs) input start).1.getD end_pos [])
-  : result.length = xs.length
-  := by
-  rw [runParser_fst_eq_lower] at h
-  exact mem_lower_traverse_preserves_length
-    (tag := tag) (β := β)
-    (xs := xs) (memo := startState) (input := input)
-    (start := start) (end_pos := end_pos)
-    (result := result) h
-
-omit [Fintype τ] in
-theorem mem_runParser_traverse_cons_bind_return_exists_head_tail
-  [DecidableEq α']
-  (p : Parser (tag := tag) β List α)
-  (f : α → α')
-  (tail : List (ParserM (tag := tag) β List α'))
-  (input : Array β) (start end_pos : ℕ)
-  {result_head : α'} {result_tail : List α'}
-  (h :
-    result_head :: result_tail ∈
-      (runParser
-        (List.traverse id
-          ((ParserM.Bind p
-            (fun a => ParserM.Return (tag := tag) (β := β) (μ := List) (f a)) : ParserM (tag := tag) β List α')
-            :: tail))
-        input start).1.getD end_pos []) :
-    ∃ split a memo_tail,
-      a ∈ ((p start) startState input).1.getD split [] ∧
-      f a = result_head ∧
-      result_tail ∈
-        (((List.traverse id tail).lower split) memo_tail input).1.getD end_pos [] := by
-  rw [runParser_fst_eq_lower] at h
-  exact mem_lower_traverse_cons_bind_return_exists_head_tail
-    (tag := tag) (β := β)
-    (p := p) (f := f) (tail := tail)
-    (memo := startState) (input := input)
-    (start := start) (end_pos := end_pos) h
-
-omit [Fintype τ] in
-theorem mem_runParser_traverse_cons_lift_exists_head_tail
-  (p : Parser (tag := tag) β List α)
-  (tail : List (ParserM (tag := tag) β List α))
-  (input : Array β) (start end_pos : ℕ)
-  {result_head : α} {result_tail : List α}
-  (h :
-    result_head :: result_tail ∈
-      (runParser
-        (List.traverse id (ParserM.lift p :: tail))
-        input start).1.getD end_pos []) :
-    ∃ split memo_tail,
-      result_head ∈ ((p start) startState input).1.getD split [] ∧
-      result_tail ∈
-        (((List.traverse id tail).lower split) memo_tail input).1.getD end_pos [] := by
-  rw [runParser_fst_eq_lower] at h
-  exact mem_lower_traverse_cons_lift_exists_head_tail
-    (tag := tag) (β := β)
-    (p := p) (tail := tail)
-    (memo := startState) (input := input)
-    (start := start) (end_pos := end_pos) h
