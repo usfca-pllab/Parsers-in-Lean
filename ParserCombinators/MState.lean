@@ -5,14 +5,9 @@ import Aesop
 import Mathlib.Control.Bifunctor
 import ParserCombinators.Order
 import ParserCombinators.Util
-import ParserCombinators.Range
 import Batteries.Control.AlternativeMonad
 
 universe u
-
--- TODO: change Map (Range ℕ) (μ α) to Map ℕ (Map ℕ (μ α))
---
--- We need to relax our hashmap equivalence classes anyway, might do it as part of this change.
 
 -- A monotonically-increasing state monad transformer.
 -- The increasing data is given by an abstraction function.
@@ -54,9 +49,6 @@ instance [Monad μ] [s : Setoid σ] [Semilatticeoid σ s] : MonadStateOf σ (MSt
   modifyGet f s :=
     let (a, s') := f s
     MStateT.merge a s' s
-
-example {τ} (typ : τ → Type u) μ [BEq τ] [Hashable τ] [Monad μ] :=
-  Quotient (Std.DHashMap.isSetoid τ (fun t => Std.HashMap (Range ℕ) (μ (typ t))))
 
 abbrev MemoKey (τ : Type u) := List (τ × ℕ)
 

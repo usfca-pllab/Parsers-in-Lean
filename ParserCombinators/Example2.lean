@@ -3,7 +3,13 @@ import ParserCombinators.CFG
 
 namespace Example2
 
-open Symbol
+open CFG Symbol ParseTree
+
+inductive Terminal where
+  | a
+  | b
+  | c
+  deriving DecidableEq, Repr
 
 inductive MyVars where
   | S
@@ -11,136 +17,97 @@ inductive MyVars where
 
 open MyVars
 
-@[simp]
-private def my_alphabet : Finset Char := {'a', 'b', 'c'}
-
-@[simp]
-private def of (c : Char ) ( h : c ∈ my_alphabet ) : my_alphabet := ⟨c, h⟩
-
-@[simp]
-private def a_in : 'a' ∈ my_alphabet := by decide
-
-@[simp]
-private def b_in : 'b' ∈ my_alphabet := by decide
-
-@[simp]
-private def c_in : 'c' ∈ my_alphabet := by decide
-
-private abbrev a := of 'a' a_in
-private abbrev b := of 'b' b_in
-private abbrev c := of 'c' c_in
-
 /-
 
 An ε-free, non-left-recursive grammar:
 
-1 → a 1 | a | b
+S → a S | a | b
 
 -/
-private def my_cfg : @CFG my_alphabet MyVars := {
+private def my_cfg : @CFG Terminal MyVars where
   start := S
-  rules :=
-    let a := of 'a' a_in
-    fun x =>
-    match x with
-      | S => [[term a, nonterm S], [term a], [term b]]
-}
+  rules
+    | S => [[term .a, nonterm S], [term .a], [term .b]]
 
-abbrev ValidTree := { tree : ParseTree my_cfg // tree.Valid }
+abbrev ValidTree := {tree : ParseTree my_cfg // tree.Valid}
+abbrev ValidTreeS := {tree : ValidTree // tree.val.root = nonterm S}
+private abbrev Tag (_ : Unit) := ValidTreeS
 
--- A set of parsers
+private def ruleAS : {rule // rule ∈ my_cfg.rules S} :=
+  ⟨[term .a, nonterm S], by simp [my_cfg]⟩
 
-@[simp]
-def parseChar' {μ : Type → Type} [Monad μ] [Traversable μ] [SemilatticeAlt μ] (expected : my_alphabet)
-    : ParserM (tag := emptyTag) UChar μ {t : ValidTree // t.val = ParseTree.Leaf expected } := by
-  refine Functor.map ?_ $ terminal (String.mk [expected.val])
-  let t : ParseTree my_cfg := ParseTree.Leaf expected
-  intro
-  refine Subtype.mk ?_ ?_
-  · use t
-    unfold ParseTree.Valid
-    trivial
-  · simp only [my_alphabet, ↓Char.isValue]
-    subst t
-    rfl
+private def ruleA : {rule // rule ∈ my_cfg.rules S} :=
+  ⟨[term .a], by simp [my_cfg]⟩
 
-@[simp]
-def parseA {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] := parseChar' (μ := μ) a
+private def ruleB : {rule // rule ∈ my_cfg.rules S} :=
+  ⟨[term .b], by simp [my_cfg]⟩
 
-@[simp]
-def parseB {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] := parseChar' (μ := μ) b
+private def justA : ValidTreeS :=
+  ⟨⟨Node S ruleA [Leaf .a], by
+      apply valid_node_of_ForestValid
+      simpa [ruleA] using
+        (ForestValid_map_leaf (cfg := my_cfg) [Terminal.a])⟩, rfl⟩
 
-abbrev ValidTreeS := { t : ValidTree // t.val.nonterminal? = some S }
+private def justB : ValidTreeS :=
+  ⟨⟨Node S ruleB [Leaf .b], by
+      apply valid_node_of_ForestValid
+      simpa [ruleB] using
+        (ForestValid_map_leaf (cfg := my_cfg) [Terminal.b])⟩, rfl⟩
 
-mutual
-unsafe def parser1 {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] : ParserM (tag := emptyTag) UChar μ ValidTreeS := by
-    refine (pure ?_) <*> parseA <*> parseS
-    rintro ⟨t, h⟩ ⟨treeS, hS⟩
-    let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a, nonterm S], by decide⟩ [t, treeS]
-    refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
-    unfold ParseTree.Valid
-    simp at hS
-    split at hS
-    · rename_i n rule children heq
-      simp_all [↓Char.isValue]
-      intro a b _h
-      simp_all only [↓Char.isValue, my_alphabet, of]
-      obtain ⟨val, property⟩ := t
-      obtain ⟨val_1, property_1⟩ := treeS
-      obtain ⟨val_2, property_2⟩ := rule
-      simp_all only [↓Char.isValue]
-      cases _h with
-      | inl h_1 =>
-        obtain ⟨left, right⟩ := h_1
-        subst left right
-        simp_all only [↓Char.isValue]
-      | inr h_2 =>
-        obtain ⟨left, right⟩ := h_2
-        subst left right
-        simp_all only [↓Char.isValue, symbols]
-        subst heq h
-        simp_all only [↓Char.isValue]
+private theorem tailForestValid (tail : ValidTreeS) :
+    ForestValid (cfg := my_cfg) [nonterm S] [tail.val.val] := by
+  rcases tail with ⟨⟨tree, hValid⟩, hRoot⟩
+  cases tree with
+  | Leaf terminal =>
+      simp at hRoot
+  | Node n rule children =>
+      cases n
+      unfold ForestValid
+      simp [ForestPairValid, hValid]
 
-    · contradiction
+private def consA (tail : ValidTreeS) : ValidTreeS :=
+  ⟨⟨Node S ruleAS [Leaf .a, tail.val.val], by
+      apply valid_node_of_ForestValid
+      simpa [ruleAS] using
+        ForestValid_append
+          (ForestValid_map_leaf (cfg := my_cfg) [Terminal.a])
+          (tailForestValid tail)⟩, rfl⟩
 
-unsafe def parseS {μ} [Monad μ] [Traversable μ] [SemilatticeAlt μ] : ParserM (tag := emptyTag) UChar μ ValidTreeS :=
-  let parser2 : ParserM UChar μ ValidTreeS := by
-    refine ?_ <$> parseA
-    rintro ⟨t, h⟩
-    let root : ParseTree my_cfg := ParseTree.Node S ⟨[term a], by decide⟩ [t]
-    refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
-    unfold ParseTree.Valid
-    simp_all [↓Char.isValue]
-    intro a b _h
-    simp_all only [↓Char.isValue, my_alphabet, of]
-    obtain ⟨val, property⟩ := t
-    obtain ⟨left, right⟩ := _h
-    subst left right
-    simp_all only [↓Char.isValue]
-  let parser3 : ParserM UChar μ ValidTreeS := by
-    refine ?_ <$> parseB
-    rintro ⟨t, h⟩
-    let root : ParseTree my_cfg := ParseTree.Node S ⟨[term b], by decide⟩ [t]
-    refine Subtype.mk (Subtype.mk root ?_) (of_eq_true (eq_self (some S)))
-    unfold ParseTree.Valid
-    simp_all [↓Char.isValue]
-    intro a b _h
-    simp_all only [↓Char.isValue, my_alphabet, of]
-    obtain ⟨val, property⟩ := t
-    obtain ⟨left, right⟩ := _h
-    subst left right
-    simp_all only [↓Char.isValue]
+private def body
+    {μ : Type → Type} [Monad μ] [SemilatticeAlt μ] [Traversable μ]
+    (recur : Unit → ParserM (tag := Tag) Terminal μ ValidTreeS) :
+    Unit → ParserM (tag := Tag) Terminal μ ValidTreeS
+  | () =>
+      (terminal' .a *> (consA <$> recur ())) ⊔
+        ((terminal' .a $> justA) ⊔ (terminal' .b $> justB))
 
-  -- TODO(maemre): try extracting the parser function for building it explicitly
-  (parser1 ⊔ (parser2 ⊔ parser3))
-end
+def parseS
+    {μ : Type → Type} [Monad μ] [SemilatticeAlt μ] [Traversable μ] :
+    ParserM (tag := Tag) Terminal μ ValidTreeS :=
+  memoize (g := body) (t := ())
 
-#check runParser'
--- #check (runParser' parseS "ab").1.values.flatten
-#check (runParser' (μ := Const) parseS "ab").1.values
+/--
+Every result returned by `parseS` carries a grammar-valid tree rooted at `S`.
+This is output certification only; it does not claim completeness or relate the
+tree frontier to the consumed input.
+-/
+theorem parseS_output_certified
+    (input : Array Terminal) (start endPos : ℕ) (tree : ValidTreeS)
+    (_hMem :
+      tree ∈
+        (runParser (parseS (μ := List)) input start).1.getD endPos []) :
+    tree.val.val.Valid ∧ tree.val.val.root = nonterm S :=
+  ⟨tree.val.property, tree.property⟩
 
--- This breaks due to reaching maximum recursion depth
--- #reduce (runParser.{1} parseS "ab").1.toList
--- #reduce (runParser (μ := Option) parseS "ab").1.values
+def accepts (input : Array Terminal) : Bool :=
+  (runParser (parseS (μ := Const)) input).1.contains input.size
+
+#guard accepts #[.a]
+#guard accepts #[.b]
+#guard accepts #[.a, .b]
+#guard accepts #[.a, .a]
+#guard !accepts #[]
+#guard !accepts #[.c]
+#guard !accepts #[.b, .a]
 
 end Example2

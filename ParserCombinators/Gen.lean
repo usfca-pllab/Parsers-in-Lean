@@ -63,13 +63,6 @@ abbrev complete (cfg : @CFG α ν) (n : ν) (p : ParserM (tag := tag cfg) α Lis
       tree.root = Symbol.nonterm n ∧
       tree.leaves = input.toList
 
-abbrev result_bounded (cfg : @CFG α ν)
-  (p : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  :=
-  ∀ start end_ : ℕ,
-  start ≤ input.size →
-  ∀ tree, tree ∈ (runParser p input start).1.getD end_ [] →
-    start ≤ end_ ∧ end_ ≤ input.size
 
 abbrev generatedListSymbolParser
   (cfg : @CFG α ν)
@@ -246,31 +239,6 @@ theorem resultMap_mem_unionSup_left
       exact h_union.2 h_mem
   · simp [Std.HashMap.getD_eq_fallback h_left_end] at h_mem
 
-set_option linter.unusedSectionVars false in
-theorem resultMap_mem_unionSup_right
-  {cfg : @CFG α ν}
-  {left right : ResultMap List (ParseTree cfg)}
-  {end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem : tree ∈ right.getD end_ []) :
-    tree ∈ (left.unionSup right).getD end_ [] := by
-  by_cases h_left_end : end_ ∈ left
-  · by_cases h_right_end : end_ ∈ right
-    · have h_union := Std.HashMap.unionSup_getD_both
-        (s := SemilatticeAlt.setoid)
-        (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid)
-        h_left_end h_right_end
-      simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h_union
-      apply h_union.2
-      simp [Max.max, SemilatticeAlt.orElse]
-      right
-      simpa [Std.HashMap.getElem_eq_getD (fallback := [])] using h_mem
-    · simp [Std.HashMap.getD_eq_fallback h_right_end] at h_mem
-  · have h_union := Std.HashMap.unionSup_getD_of_not_contains
-      (s := SemilatticeAlt.setoid)
-      (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid)
-      (fallback := []) left right h_left_end
-    simp [SemilatticeAlt.setoid, List.memSetoid, Subset, List.Subset] at h_union
-    exact h_union.2 h_mem
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 theorem resultMap_sound_of_quot_eq
@@ -310,35 +278,8 @@ theorem resultMap_bounded_of_quot_eq
   simp [List.memSetoid, Subset, List.Subset] at h_getD
   exact h_right end_ h_start tree (@h_getD.1 tree h_mem)
 
-abbrev positionMap_sound (cfg : @CFG α ν) (n : ν)
-  (positionMap :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))) :=
-  ∀ key start,
-    resultMap_sound cfg n
-      (positionMap.getD (key, start) Std.HashMap.emptyWithCapacity)
-
-abbrev positionMap_bounded (cfg : @CFG α ν) (input : Array α)
-  (positionMap :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))) :=
-  ∀ key start,
-    resultMap_bounded cfg input start
-      (positionMap.getD (key, start) Std.HashMap.emptyWithCapacity)
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_sound_empty (cfg : @CFG α ν) (n : ν) :
-    positionMap_sound cfg n
-      (Std.HashMap.emptyWithCapacity :
-        Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))) := by
-  intro key start
-  simpa using resultMap_sound_empty cfg n
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_bounded_empty (cfg : @CFG α ν) (input : Array α) :
-    positionMap_bounded cfg input
-      (Std.HashMap.emptyWithCapacity :
-        Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))) := by
-  intro key start
-  simpa using resultMap_bounded_empty cfg input start
+private abbrev PositionMap (cfg : @CFG α ν) :=
+  Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))
 
 abbrev positionMapUnion
   (cfg : @CFG α ν)
@@ -351,155 +292,294 @@ abbrev positionMapUnion
       (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
     left right
 
-set_option linter.unusedSectionVars false in
-theorem positionMap_sound_sup
-  {cfg : @CFG α ν} {n : ν}
-  {left right :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))}
-  (h_left : positionMap_sound cfg n left)
-  (h_right : positionMap_sound cfg n right) :
-    positionMap_sound cfg n (positionMapUnion cfg left right) := by
-  intro key start
-  by_cases h_left_key : (key, start) ∈ left
-  · by_cases h_right_key : (key, start) ∈ right
-    · have h_union := Std.HashMap.unionSup_getD_both
-        (s := Std.HashMap.isSetoid
-          (s := List.memSetoid (ParseTree cfg)))
-        (semi := Std.HashMap.instSemilatticeoidIsSetoid
-          (s := List.memSetoid (ParseTree cfg))
-          (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (m₁ := left) (m₂ := right) h_left_key h_right_key
-      have h_target :
-          resultMap_sound cfg n
-            ((left.get (key, start) h_left_key).unionSup
-              (right.get (key, start) h_right_key)) := by
-        exact resultMap_sound_sup
-          (cfg := cfg) (n := n)
-          (left := left.get (key, start) h_left_key)
-          (right := right.get (key, start) h_right_key)
-          (by
-            simpa [Std.HashMap.getElem_eq_getD
-              (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))]
-              using h_left key start)
-          (by
-            simpa [Std.HashMap.getElem_eq_getD
-              (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))]
-              using h_right key start)
-      exact resultMap_sound_of_quot_eq
-        (cfg := cfg) (n := n)
-        (left := (positionMapUnion cfg left right).getD (key, start)
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        (right := (left.get (key, start) h_left_key).unionSup
-          (right.get (key, start) h_right_key))
-        (by simpa [positionMapUnion, Max.max] using h_union)
-        h_target
-    · have h_union := Std.HashMap.unionSup_getD_of_right_not_contains
-        (s := Std.HashMap.isSetoid
-          (s := List.memSetoid (ParseTree cfg)))
-        (semi := Std.HashMap.instSemilatticeoidIsSetoid
-          (s := List.memSetoid (ParseTree cfg))
-          (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        left right h_right_key
-      exact resultMap_sound_of_quot_eq
-        (cfg := cfg) (n := n)
-        (left := (positionMapUnion cfg left right).getD (key, start)
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        (right := left.getD (key, start)
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        (by simpa [positionMapUnion] using h_union)
-        (h_left key start)
-  · have h_union := Std.HashMap.unionSup_getD_of_not_contains
-      (s := Std.HashMap.isSetoid
-        (s := List.memSetoid (ParseTree cfg)))
-      (semi := Std.HashMap.instSemilatticeoidIsSetoid
-        (s := List.memSetoid (ParseTree cfg))
-        (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-      (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-      left right h_left_key
-    exact resultMap_sound_of_quot_eq
-      (cfg := cfg) (n := n)
-      (left := (positionMapUnion cfg left right).getD (key, start)
-        (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-      (right := right.getD (key, start)
-        (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-      (by simpa [positionMapUnion] using h_union)
-      (h_right key start)
+omit [BEq α] [DecidableEq α] [Fintype ν] in
+private theorem positionMap_cache_of_mem
+    {cfg : @CFG α ν}
+    {positionMap : PositionMap cfg}
+    {entry : MemoEntryKey ν}
+    (h_entry : entry ∈ positionMap) :
+    positionMap[entry]? =
+      some (positionMap.getD entry
+        (Std.HashMap.emptyWithCapacity :
+          ResultMap List (ParseTree cfg))) := by
+  have h_some : positionMap[entry]? = some positionMap[entry] := by
+    simp [h_entry]
+  simpa [Std.HashMap.getElem_eq_getD
+      (m := positionMap) (a := entry)
+      (fallback :=
+        (Std.HashMap.emptyWithCapacity :
+          ResultMap List (ParseTree cfg)))]
+    using h_some
 
-set_option linter.unusedSectionVars false in
-theorem positionMap_bounded_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))}
-  (h_left : positionMap_bounded cfg input left)
-  (h_right : positionMap_bounded cfg input right) :
-    positionMap_bounded cfg input (positionMapUnion cfg left right) := by
-  intro key start
-  by_cases h_left_key : (key, start) ∈ left
-  · by_cases h_right_key : (key, start) ∈ right
-    · have h_union := Std.HashMap.unionSup_getD_both
+private abbrev PositionEntries
+    (cfg : @CFG α ν)
+    (P : MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop)
+    (positionMap : PositionMap cfg) :=
+  ∀ entry resultMap, positionMap[entry]? = some resultMap → P entry resultMap
+
+omit [Fintype ν] in
+private theorem positionEntries_union
+    {cfg : @CFG α ν}
+    {P : MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop}
+    {left right : PositionMap cfg}
+    (h_sup :
+      ∀ entry {left right},
+        P entry left →
+        P entry right →
+        P entry (left.unionSup right))
+    (h_quot :
+      ∀ entry {left right},
+        Quotient.mk
+            (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg))) left =
+          Quotient.mk
+            (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg))) right →
+        P entry right →
+        P entry left)
+    (h_left : PositionEntries cfg P left)
+    (h_right : PositionEntries cfg P right) :
+    PositionEntries cfg P (positionMapUnion cfg left right) := by
+  intro entry resultMap h_cache
+  let emptyResultMap : ResultMap List (ParseTree cfg) :=
+    Std.HashMap.emptyWithCapacity
+  have h_entry : entry ∈ positionMapUnion cfg left right := by
+    by_contra h_not_mem
+    have h_none := Std.HashMap.getElem?_eq_none
+      (m := positionMapUnion cfg left right) (a := entry) h_not_mem
+    rw [h_cache] at h_none
+    simp at h_none
+  have h_output_eq :
+      (positionMapUnion cfg left right).getD entry emptyResultMap = resultMap := by
+    rw [Std.HashMap.getD_eq_getD_getElem?, h_cache]
+    simp
+  by_cases h_left_entry : entry ∈ left
+  · have h_left_cache :
+        left[entry]? = some (left.getD entry emptyResultMap) :=
+      positionMap_cache_of_mem
+        (cfg := cfg) (positionMap := left) h_left_entry
+    have h_left_good :=
+      h_left entry (left.getD entry emptyResultMap) h_left_cache
+    by_cases h_right_entry : entry ∈ right
+    · have h_right_cache :
+          right[entry]? = some (right.getD entry emptyResultMap) :=
+        positionMap_cache_of_mem
+          (cfg := cfg) (positionMap := right) h_right_entry
+      have h_right_good :=
+        h_right entry (right.getD entry emptyResultMap) h_right_cache
+      have h_union := Std.HashMap.unionSup_getD_both
         (s := Std.HashMap.isSetoid
           (s := List.memSetoid (ParseTree cfg)))
         (semi := Std.HashMap.instSemilatticeoidIsSetoid
           (s := List.memSetoid (ParseTree cfg))
           (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (m₁ := left) (m₂ := right) h_left_key h_right_key
-      have h_target :
-          resultMap_bounded cfg input start
-            ((left.get (key, start) h_left_key).unionSup
-              (right.get (key, start) h_right_key)) := by
-        exact resultMap_bounded_sup
-          (cfg := cfg) (input := input) (start := start)
-          (left := left.get (key, start) h_left_key)
-          (right := right.get (key, start) h_right_key)
-          (by
-            simpa [Std.HashMap.getElem_eq_getD
-              (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))]
-              using h_left key start)
-          (by
-            simpa [Std.HashMap.getElem_eq_getD
-              (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))]
-              using h_right key start)
-      exact resultMap_bounded_of_quot_eq
-        (cfg := cfg) (input := input) (start := start)
-        (left := (positionMapUnion cfg left right).getD (key, start)
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        (right := (left.get (key, start) h_left_key).unionSup
-          (right.get (key, start) h_right_key))
-        (by simpa [positionMapUnion, Max.max] using h_union)
-        h_target
+        (m₁ := left) (m₂ := right) h_left_entry h_right_entry
+      have h_eq :
+          Quotient.mk
+              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
+              resultMap =
+            Quotient.mk
+              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
+              ((left.getD entry emptyResultMap).unionSup
+                (right.getD entry emptyResultMap)) := by
+        rw [← h_output_eq]
+        simpa [positionMapUnion, emptyResultMap, Max.max,
+          Std.HashMap.getElem_eq_getD
+            (m := left) (a := entry) (fallback := emptyResultMap),
+          Std.HashMap.getElem_eq_getD
+            (m := right) (a := entry) (fallback := emptyResultMap)]
+          using h_union
+      exact h_quot entry h_eq (h_sup entry h_left_good h_right_good)
     · have h_union := Std.HashMap.unionSup_getD_of_right_not_contains
         (s := Std.HashMap.isSetoid
           (s := List.memSetoid (ParseTree cfg)))
         (semi := Std.HashMap.instSemilatticeoidIsSetoid
           (s := List.memSetoid (ParseTree cfg))
           (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        left right h_right_key
-      exact resultMap_bounded_of_quot_eq
-        (cfg := cfg) (input := input) (start := start)
-        (left := (positionMapUnion cfg left right).getD (key, start)
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        (right := left.getD (key, start)
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-        (by simpa [positionMapUnion] using h_union)
-        (h_left key start)
-  · have h_union := Std.HashMap.unionSup_getD_of_not_contains
-      (s := Std.HashMap.isSetoid
-        (s := List.memSetoid (ParseTree cfg)))
-      (semi := Std.HashMap.instSemilatticeoidIsSetoid
-        (s := List.memSetoid (ParseTree cfg))
-        (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-      (fallback := (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-      left right h_left_key
-    exact resultMap_bounded_of_quot_eq
-      (cfg := cfg) (input := input) (start := start)
-      (left := (positionMapUnion cfg left right).getD (key, start)
-        (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-      (right := right.getD (key, start)
-        (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)))
-      (by simpa [positionMapUnion] using h_union)
-      (h_right key start)
+        (fallback := emptyResultMap) left right h_right_entry
+      have h_eq :
+          Quotient.mk
+              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
+              resultMap =
+            Quotient.mk
+              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
+              (left.getD entry emptyResultMap) := by
+        rw [← h_output_eq]
+        simpa [positionMapUnion, emptyResultMap] using h_union
+      exact h_quot entry h_eq h_left_good
+  · by_cases h_right_entry : entry ∈ right
+    · have h_right_cache :
+          right[entry]? = some (right.getD entry emptyResultMap) :=
+        positionMap_cache_of_mem
+          (cfg := cfg) (positionMap := right) h_right_entry
+      have h_right_good :=
+        h_right entry (right.getD entry emptyResultMap) h_right_cache
+      have h_union := Std.HashMap.unionSup_getD_of_not_contains
+        (s := Std.HashMap.isSetoid
+          (s := List.memSetoid (ParseTree cfg)))
+        (semi := Std.HashMap.instSemilatticeoidIsSetoid
+          (s := List.memSetoid (ParseTree cfg))
+          (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
+        (fallback := emptyResultMap) left right h_left_entry
+      have h_eq :
+          Quotient.mk
+              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
+              resultMap =
+            Quotient.mk
+              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
+              (right.getD entry emptyResultMap) := by
+        rw [← h_output_eq]
+        simpa [positionMapUnion, emptyResultMap] using h_union
+      exact h_quot entry h_eq h_right_good
+    · have h_mem_or : entry ∈ left ∨ entry ∈ right := by
+        exact (Std.HashMap.mem_of_unionSup_mem
+          (s := Std.HashMap.isSetoid
+            (s := List.memSetoid (ParseTree cfg)))
+          (semi := Std.HashMap.instSemilatticeoidIsSetoid
+            (s := List.memSetoid (ParseTree cfg))
+            (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
+          (m₁ := left) (m₂ := right)
+          (k := entry)).mp (by simpa [positionMapUnion] using h_entry)
+      cases h_mem_or with
+      | inl h_mem => exact False.elim (h_left_entry h_mem)
+      | inr h_mem => exact False.elim (h_right_entry h_mem)
+
+private abbrev MemoEntries
+    (cfg : @CFG α ν)
+    (P : (n : ν) → MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop)
+    (memo : MemoData (tag cfg) List) :=
+  ∀ n entry resultMap,
+    (memo.getD n ⊥)[entry]? = some resultMap →
+    P n entry resultMap
+
+omit [Fintype ν] in
+private theorem memoEntries_sup
+    {cfg : @CFG α ν}
+    {P : (n : ν) → MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop}
+    {left right : MemoData (tag cfg) List}
+    (h_sup :
+      ∀ n entry {left right},
+        P n entry left →
+        P n entry right →
+        P n entry (left.unionSup right))
+    (h_quot :
+      ∀ n entry {left right},
+        Quotient.mk
+            (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg))) left =
+          Quotient.mk
+            (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg))) right →
+        P n entry right →
+        P n entry left)
+    (h_left : MemoEntries cfg P left)
+    (h_right : MemoEntries cfg P right) :
+    MemoEntries cfg P (left ⊔ right) := by
+  intro n entry resultMap h_cache
+  let emptyPositionMap : PositionMap cfg := Std.HashMap.emptyWithCapacity
+  have h_left_position :
+      PositionEntries cfg (P n) (left.getD n emptyPositionMap) := by
+    intro entry resultMap h_entry
+    exact h_left n entry resultMap (by
+      simpa [emptyPositionMap, Bot.bot] using h_entry)
+  have h_right_position :
+      PositionEntries cfg (P n) (right.getD n emptyPositionMap) := by
+    intro entry resultMap h_entry
+    exact h_right n entry resultMap (by
+      simpa [emptyPositionMap, Bot.bot] using h_entry)
+  have h_empty_position :
+      PositionEntries cfg (P n) emptyPositionMap := by
+    intro entry resultMap h_entry
+    simp [emptyPositionMap] at h_entry
+  change
+    ((Std.DHashMap.unionWith
+      (fun _ => positionMapUnion cfg)
+      (fun _ => emptyPositionMap)
+      left right).getD n emptyPositionMap)[entry]? = some resultMap at h_cache
+  by_cases h_left_n : n ∈ left
+  · by_cases h_right_n : n ∈ right
+    · rw [Std.DHashMap.getD_eq_getD_get?] at h_cache
+      rw [Std.DHashMap.unionWith_getElem_both
+        (m₁ := left) (m₂ := right)
+        (f := fun _ => positionMapUnion cfg)
+        (z := fun _ => emptyPositionMap)
+        h_left_n h_right_n] at h_cache
+      exact positionEntries_union
+        (cfg := cfg) (P := P n)
+        (h_sup n) (h_quot n)
+        (by
+          simpa [Std.DHashMap.get_eq_getD
+            (m := left) (a := n) (fallback := emptyPositionMap)
+            (h := h_left_n)] using h_left_position)
+        (by
+          simpa [Std.DHashMap.get_eq_getD
+            (m := right) (a := n) (fallback := emptyPositionMap)
+            (h := h_right_n)] using h_right_position)
+        entry resultMap h_cache
+    · rw [Std.DHashMap.getD_eq_getD_get?] at h_cache
+      rw [Std.DHashMap.unionWith_getElem_not_contains_right
+        (m₁ := left) (m₂ := right)
+        (f := fun _ => positionMapUnion cfg)
+        (z := fun _ => emptyPositionMap)
+        h_right_n] at h_cache
+      rw [Std.DHashMap.get?_eq_some_get h_left_n] at h_cache
+      exact positionEntries_union
+        (cfg := cfg) (P := P n)
+        (h_sup n) (h_quot n)
+        h_left_position h_empty_position
+        entry resultMap (by
+          simpa [Std.DHashMap.get_eq_getD
+            (m := left) (a := n) (fallback := emptyPositionMap)
+            (h := h_left_n)] using h_cache)
+  · by_cases h_right_n : n ∈ right
+    · rw [Std.DHashMap.getD_eq_getD_get?] at h_cache
+      rw [Std.DHashMap.unionWith_getElem_not_contains
+        (m₁ := left) (m₂ := right)
+        (f := fun _ => positionMapUnion cfg)
+        (z := fun _ => emptyPositionMap)
+        h_left_n] at h_cache
+      rw [Std.DHashMap.get?_eq_some_get h_right_n] at h_cache
+      exact positionEntries_union
+        (cfg := cfg) (P := P n)
+        (h_sup n) (h_quot n)
+        h_empty_position h_right_position
+        entry resultMap (by
+          simpa [Std.DHashMap.get_eq_getD
+            (m := right) (a := n) (fallback := emptyPositionMap)
+            (h := h_right_n)] using h_cache)
+    · have h_union_none :
+          (Std.DHashMap.unionWith
+            (fun _ => positionMapUnion cfg)
+            (fun _ => emptyPositionMap)
+            left right).get? n = none := by
+        rw [Std.DHashMap.unionWith_getElem_not_contains
+          (m₁ := left) (m₂ := right)
+          (f := fun _ => positionMapUnion cfg)
+          (z := fun _ => emptyPositionMap)
+          h_left_n]
+        simp [Std.DHashMap.get?_eq_none, h_right_n]
+      rw [Std.DHashMap.getD_eq_getD_get?, h_union_none] at h_cache
+      simp [emptyPositionMap] at h_cache
+
+omit [BEq α] [DecidableEq α] [Fintype ν] in
+private theorem memoEntries_getD
+    {cfg : @CFG α ν}
+    {P : (n : ν) → MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop}
+    {memo : MemoData (tag cfg) List}
+    (h_empty :
+      ∀ n entry,
+        P n entry
+          (Std.HashMap.emptyWithCapacity :
+            ResultMap List (ParseTree cfg)))
+    (h_memo : MemoEntries cfg P memo) :
+    ∀ n entry,
+      P n entry
+        ((memo.getD n ⊥).getD entry
+          (Std.HashMap.emptyWithCapacity :
+            ResultMap List (ParseTree cfg))) := by
+  intro n entry
+  rw [Std.HashMap.getD_eq_getD_getElem?]
+  cases h_entry : (memo.getD n ⊥)[entry]? with
+  | none =>
+      exact h_empty n entry
+  | some resultMap =>
+      exact h_memo n entry resultMap h_entry
 
 omit [BEq α] [DecidableEq α] [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 theorem cachedResultMap_memoWithCachedResult_self
@@ -623,229 +703,100 @@ theorem resultMap_bounded_of_memo_bounded
   intro end_ h_start tree h_mem
   exact h_memo n key start end_ h_start tree h_mem
 
-omit [BEq α] [DecidableEq α] [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem positionMap_sound_of_memo_sound
-  {cfg : @CFG α ν} {input : Array α}
-  {memo : MemoData (tag cfg) List}
-  (h_memo : memo_sound cfg input memo)
-  (n : ν) :
-    positionMap_sound cfg n
-      (memo.getD n
-        (Std.HashMap.emptyWithCapacity :
-          Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))) := by
-  intro key start
-  exact resultMap_sound_of_memo_sound h_memo n key start
-
-omit [BEq α] [DecidableEq α] [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem positionMap_bounded_of_memo_bounded
-  {cfg : @CFG α ν} {input : Array α}
-  {memo : MemoData (tag cfg) List}
-  (h_memo : memo_bounded cfg input memo)
-  (n : ν) :
-    positionMap_bounded cfg input
-      (memo.getD n
-        (Std.HashMap.emptyWithCapacity :
-          Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))) := by
-  intro key start
-  exact resultMap_bounded_of_memo_bounded h_memo n key start
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_sound_of_memo_sound_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right : MemoData (tag cfg) List}
-  (h_left : memo_sound cfg input left)
-  (h_right : memo_sound cfg input right)
-  (n : ν) :
-    positionMap_sound cfg n
-      ((left ⊔ right).getD n
-        (Std.HashMap.emptyWithCapacity :
-          Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))) := by
-  let emptyPositionMap :
-      Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)) :=
-    Std.HashMap.emptyWithCapacity
-  change positionMap_sound cfg n
-    ((Std.DHashMap.unionWith
-      (fun _ => positionMapUnion cfg)
-      (fun _ => emptyPositionMap)
-      left right).getD n emptyPositionMap)
-  by_cases h_left_n : n ∈ left
-  · by_cases h_right_n : n ∈ right
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_both
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_left_n h_right_n]
-      exact positionMap_sound_sup
-        (cfg := cfg) (n := n)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := left) (a := n) (fallback := emptyPositionMap)
-            (h := h_left_n)]
-            using positionMap_sound_of_memo_sound h_left n)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := right) (a := n) (fallback := emptyPositionMap)
-            (h := h_right_n)]
-            using positionMap_sound_of_memo_sound h_right n)
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_not_contains_right
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_right_n]
-      rw [Std.DHashMap.get?_eq_some_get h_left_n]
-      exact positionMap_sound_sup
-        (cfg := cfg) (n := n)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := left) (a := n) (fallback := emptyPositionMap)
-            (h := h_left_n)]
-            using positionMap_sound_of_memo_sound h_left n)
-        (positionMap_sound_empty cfg n)
-  · by_cases h_right_n : n ∈ right
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_not_contains
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_left_n]
-      rw [Std.DHashMap.get?_eq_some_get h_right_n]
-      exact positionMap_sound_sup
-        (cfg := cfg) (n := n)
-        (positionMap_sound_empty cfg n)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := right) (a := n) (fallback := emptyPositionMap)
-            (h := h_right_n)]
-            using positionMap_sound_of_memo_sound h_right n)
-    · have h_union_none :
-          (Std.DHashMap.unionWith
-            (fun _ => positionMapUnion cfg)
-            (fun _ => emptyPositionMap)
-            left right).get? n = none := by
-        rw [Std.DHashMap.unionWith_getElem_not_contains
-          (m₁ := left) (m₂ := right)
-          (f := fun _ => positionMapUnion cfg)
-          (z := fun _ => emptyPositionMap)
-          h_left_n]
-        simp [Std.DHashMap.get?_eq_none, h_right_n]
-      rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [h_union_none]
-      exact positionMap_sound_empty cfg n
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_bounded_of_memo_bounded_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right : MemoData (tag cfg) List}
-  (h_left : memo_bounded cfg input left)
-  (h_right : memo_bounded cfg input right)
-  (n : ν) :
-    positionMap_bounded cfg input
-      ((left ⊔ right).getD n
-        (Std.HashMap.emptyWithCapacity :
-          Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))) := by
-  let emptyPositionMap :
-      Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)) :=
-    Std.HashMap.emptyWithCapacity
-  change positionMap_bounded cfg input
-    ((Std.DHashMap.unionWith
-      (fun _ => positionMapUnion cfg)
-      (fun _ => emptyPositionMap)
-      left right).getD n emptyPositionMap)
-  by_cases h_left_n : n ∈ left
-  · by_cases h_right_n : n ∈ right
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_both
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_left_n h_right_n]
-      exact positionMap_bounded_sup
-        (cfg := cfg) (input := input)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := left) (a := n) (fallback := emptyPositionMap)
-            (h := h_left_n)]
-            using positionMap_bounded_of_memo_bounded h_left n)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := right) (a := n) (fallback := emptyPositionMap)
-            (h := h_right_n)]
-            using positionMap_bounded_of_memo_bounded h_right n)
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_not_contains_right
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_right_n]
-      rw [Std.DHashMap.get?_eq_some_get h_left_n]
-      exact positionMap_bounded_sup
-        (cfg := cfg) (input := input)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := left) (a := n) (fallback := emptyPositionMap)
-            (h := h_left_n)]
-            using positionMap_bounded_of_memo_bounded h_left n)
-        (positionMap_bounded_empty cfg input)
-  · by_cases h_right_n : n ∈ right
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_not_contains
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_left_n]
-      rw [Std.DHashMap.get?_eq_some_get h_right_n]
-      exact positionMap_bounded_sup
-        (cfg := cfg) (input := input)
-        (positionMap_bounded_empty cfg input)
-        (by
-          simpa [Std.DHashMap.get_eq_getD
-            (m := right) (a := n) (fallback := emptyPositionMap)
-            (h := h_right_n)]
-            using positionMap_bounded_of_memo_bounded h_right n)
-    · have h_union_none :
-          (Std.DHashMap.unionWith
-            (fun _ => positionMapUnion cfg)
-            (fun _ => emptyPositionMap)
-            left right).get? n = none := by
-        rw [Std.DHashMap.unionWith_getElem_not_contains
-          (m₁ := left) (m₂ := right)
-          (f := fun _ => positionMapUnion cfg)
-          (z := fun _ => emptyPositionMap)
-          h_left_n]
-        simp [Std.DHashMap.get?_eq_none, h_right_n]
-      rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [h_union_none]
-      exact positionMap_bounded_empty cfg input
-
 theorem memo_sound_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right : MemoData (tag cfg) List}
-  (h_left : memo_sound cfg input left)
-  (h_right : memo_sound cfg input right) :
+    {cfg : @CFG α ν} {input : Array α}
+    {left right : MemoData (tag cfg) List}
+    (h_left : memo_sound cfg input left)
+    (h_right : memo_sound cfg input right) :
     memo_sound cfg input (left ⊔ right) := by
-  intro n key start end_ tree h_mem
-  have h_position :=
-    positionMap_sound_of_memo_sound_sup
-      (cfg := cfg) (input := input)
-      (left := left) (right := right) h_left h_right n
-  exact h_position key start end_ tree (by
-    simpa [cachedResultMap, Bot.bot] using h_mem)
+  let P :
+      (n : ν) → MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop :=
+    fun n _ resultMap => resultMap_sound cfg n resultMap
+  have h_entries : MemoEntries cfg P (left ⊔ right) :=
+    memoEntries_sup
+      (P := P)
+      (fun n _ _ _ h_left h_right =>
+        resultMap_sound_sup h_left h_right)
+      (fun n _ _ _ h_eq h_right =>
+        resultMap_sound_of_quot_eq h_eq h_right)
+      (by
+        intro n entry resultMap h_cache
+        rcases entry with ⟨key, start⟩
+        have h_result :
+            (left.getD n ⊥).getD (key, start)
+                (Std.HashMap.emptyWithCapacity :
+                  ResultMap List (ParseTree cfg)) =
+              resultMap := by
+          rw [Std.HashMap.getD_eq_getD_getElem?, h_cache]
+          rfl
+        rw [← h_result]
+        exact resultMap_sound_of_memo_sound h_left n key start)
+      (by
+        intro n entry resultMap h_cache
+        rcases entry with ⟨key, start⟩
+        have h_result :
+            (right.getD n ⊥).getD (key, start)
+                (Std.HashMap.emptyWithCapacity :
+                  ResultMap List (ParseTree cfg)) =
+              resultMap := by
+          rw [Std.HashMap.getD_eq_getD_getElem?, h_cache]
+          rfl
+        rw [← h_result]
+        exact resultMap_sound_of_memo_sound h_right n key start)
+  intro n key start
+  simpa [P, cachedResultMap, Bot.bot] using
+    (memoEntries_getD
+      (P := P)
+      (fun n _ => resultMap_sound_empty cfg n)
+      h_entries n (key, start))
 
 theorem memo_bounded_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right : MemoData (tag cfg) List}
-  (h_left : memo_bounded cfg input left)
-  (h_right : memo_bounded cfg input right) :
+    {cfg : @CFG α ν} {input : Array α}
+    {left right : MemoData (tag cfg) List}
+    (h_left : memo_bounded cfg input left)
+    (h_right : memo_bounded cfg input right) :
     memo_bounded cfg input (left ⊔ right) := by
-  intro n key start end_ h_start tree h_mem
-  have h_position :=
-    positionMap_bounded_of_memo_bounded_sup
-      (cfg := cfg) (input := input)
-      (left := left) (right := right) h_left h_right n
-  exact h_position key start end_ h_start tree (by
-    simpa [cachedResultMap, Bot.bot] using h_mem)
+  let P :
+      (n : ν) → MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop :=
+    fun _ entry resultMap =>
+      resultMap_bounded cfg input entry.2 resultMap
+  have h_entries : MemoEntries cfg P (left ⊔ right) :=
+    memoEntries_sup
+      (P := P)
+      (fun _ _ _ _ h_left h_right =>
+        resultMap_bounded_sup h_left h_right)
+      (fun _ _ _ _ h_eq h_right =>
+        resultMap_bounded_of_quot_eq h_eq h_right)
+      (by
+        intro n entry resultMap h_cache
+        rcases entry with ⟨key, start⟩
+        have h_result :
+            (left.getD n ⊥).getD (key, start)
+                (Std.HashMap.emptyWithCapacity :
+                  ResultMap List (ParseTree cfg)) =
+              resultMap := by
+          rw [Std.HashMap.getD_eq_getD_getElem?, h_cache]
+          rfl
+        rw [← h_result]
+        exact resultMap_bounded_of_memo_bounded h_left n key start)
+      (by
+        intro n entry resultMap h_cache
+        rcases entry with ⟨key, start⟩
+        have h_result :
+            (right.getD n ⊥).getD (key, start)
+                (Std.HashMap.emptyWithCapacity :
+                  ResultMap List (ParseTree cfg)) =
+              resultMap := by
+          rw [Std.HashMap.getD_eq_getD_getElem?, h_cache]
+          rfl
+        rw [← h_result]
+        exact resultMap_bounded_of_memo_bounded h_right n key start)
+  intro n key start
+  simpa [P, cachedResultMap, Bot.bot] using
+    (memoEntries_getD
+      (P := P)
+      (fun _ entry => resultMap_bounded_empty cfg input entry.2)
+      h_entries n (key, start))
 
 theorem memo_wellFormed_sup
   {cfg : @CFG α ν} {input : Array α}
@@ -1079,18 +1030,6 @@ theorem resultMap_sound_of_lower_result_sound
   intro end_ tree h_mem
   exact h memo h_memo start end_ tree h_mem
 
-omit [Fintype ν] in
-theorem result_bounded_of_lower_result_bounded
-  {cfg : @CFG α ν}
-  {p : ParserM (tag := tag cfg) α List (ParseTree cfg)} {input : Array α}
-  (h : lower_result_bounded cfg p input) :
-    result_bounded cfg p input := by
-  unfold result_bounded at *
-  intro start end_ h_start tree h_mem
-  rw [runParser_fst_eq_lower] at h_mem
-  exact h (startState : MemoData (tag cfg) List)
-    (memo_wellFormed_empty cfg input)
-    start end_ h_start tree h_mem
 
 omit [Fintype ν] in
 theorem resultMap_bounded_of_lower_result_bounded
@@ -1124,29 +1063,6 @@ theorem lower_map_memo_wellFormed
     (memo := memo) (input := input) (start := start)]
   exact h memo h_memo start
 
-omit [Fintype ν] in
-theorem lower_map_sound_of_forall
-  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
-  {p : ParserM (tag := tag cfg) α List γ}
-  {f : γ → ParseTree cfg}
-  {input : Array α} {n : ν}
-  (h_p :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start end_ : ℕ,
-      start ≤ end_ ∧ end_ ≤ input.size →
-      ∀ x, x ∈ ((p.lower start) memo input).1.getD end_ [] →
-        (f x).Valid ∧ (f x).root = Symbol.nonterm n) :
-    lower_sound cfg n (f <$> p) input := by
-  intro memo h_memo start end_ h_bound tree h_mem
-  obtain ⟨x, h_x, h_tree⟩ :=
-    mem_lower_map_exists_of_mem
-      (tag := tag cfg) (β := α)
-      (p := p) (f := f)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_) (y := tree) h_mem
-  rw [← h_tree]
-  exact h_p memo h_memo start end_ h_bound x h_x
 
 omit [Fintype ν] in
 theorem lower_map_result_sound_of_forall
@@ -1549,218 +1465,6 @@ theorem bind_action_prefix_memo_wellFormed
     (↑((p start) memo input).2)
     h_after_p
 
-omit [Fintype ν] in
-theorem mem_lower_bind_exists_action_split_wf
-  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
-  {input : Array α}
-  (p : Parser (tag := tag cfg) α List δ)
-  (k : δ → ParserM (tag := tag cfg) α List γ)
-  {memo : MemoData (tag cfg) List} {start end_ : ℕ} {x : γ}
-  (h_p :
-    ∀ start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input (((p start) memo input).2.val))
-  (h_k : ∀ a, lower_memo_wellFormed cfg (k a) input)
-  (h_memo : memo_wellFormed cfg input memo)
-  (h :
-    x ∈ (((ParserM.Bind p k).lower start) memo input).1.getD end_ []) :
-    ∃ split a memoPrefix,
-      memo_wellFormed cfg input memoPrefix ∧
-      x ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
-  obtain ⟨prePairs, _postPairs, split, _values, preValues, _postValues, a,
-    _h_toList, _h_values, h_action⟩ :=
-    mem_lower_bind_exists_action_split_mem
-      (tag := tag cfg) (β := α)
-      (p := p) (k := k)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_) (x := x) h
-  let memoPrefix : MemoData (tag cfg) List :=
-    ((Traversable.foldl joinUnderCache
-      (List.foldl (Traversable.foldl joinUnderCache)
-        (pure Std.HashMap.emptyWithCapacity)
-        (List.map
-          (fun pair : ℕ × List δ =>
-            match pair with
-              | (j, values) => List.map (fun a => (k a).lower j) values)
-          prePairs))
-      (List.map (fun a => (k a).lower split) preValues))
-      (↑((p start) memo input).2) input).2.val
-  have h_prefix_wf :
-      memo_wellFormed cfg input memoPrefix := by
-    simpa [memoPrefix] using
-      (bind_action_prefix_memo_wellFormed
-        (cfg := cfg) (input := input)
-        (p := p) (k := k)
-        (prePairs := prePairs) (preValues := preValues)
-        (split := split) (start := start)
-        (memo := memo) h_p h_k h_memo)
-  have h_action' :
-      x ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
-    simpa [memoPrefix] using h_action
-  exact ⟨split, a, memoPrefix, h_prefix_wf, h_action'⟩
-
-omit [Fintype ν] in
-theorem lower_bind_constructor_result_sound
-  {cfg : @CFG α ν} {δ : Type u}
-  {input : Array α} {n : ν}
-  (p : Parser (tag := tag cfg) α List δ)
-  (k : δ → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (h_p_memo :
-    ∀ start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input (((p start) memo input).2.val))
-  (h_k_sound : ∀ a, lower_result_sound cfg n (k a) input)
-  (h_k_memo : ∀ a, lower_memo_wellFormed cfg (k a) input) :
-    lower_result_sound cfg n (ParserM.Bind p k) input := by
-  intro memo h_memo start end_ tree h_mem
-  obtain ⟨split, a, memoPrefix, h_prefix_wf, h_action⟩ :=
-    mem_lower_bind_exists_action_split_wf
-      (cfg := cfg) (input := input)
-      (p := p) (k := k)
-      (memo := memo) (start := start) (end_ := end_)
-      (x := tree) h_p_memo h_k_memo h_memo h_mem
-  exact h_k_sound a memoPrefix h_prefix_wf split end_ tree h_action
-
-omit [Fintype ν] in
-theorem lower_bind_constructor_result_bounded
-  {cfg : @CFG α ν} {δ : Type u}
-  {input : Array α}
-  (p : Parser (tag := tag cfg) α List δ)
-  (k : δ → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (h_p_bounded :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start split : ℕ,
-      start ≤ input.size →
-      ∀ a : δ, a ∈ ((p start) memo input).1.getD split [] →
-        start ≤ split ∧ split ≤ input.size)
-  (h_p_memo :
-    ∀ start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input (((p start) memo input).2.val))
-  (h_k_bounded : ∀ a, lower_result_bounded cfg (k a) input)
-  (h_k_memo : ∀ a, lower_memo_wellFormed cfg (k a) input) :
-    lower_result_bounded cfg (ParserM.Bind p k) input := by
-  intro memo h_memo start end_ h_start tree h_mem
-  obtain ⟨prePairs, _postPairs, split, values, preValues, _postValues, a,
-    h_toList, h_values, h_action⟩ :=
-    mem_lower_bind_exists_action_split_mem
-      (tag := tag cfg) (β := α)
-      (p := p) (k := k)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_) (x := tree) h_mem
-  have h_get : ((p start) memo input).1[split]? = some values := by
-    rw [← Std.HashMap.mem_toList_iff_getElem?_eq_some]
-    rw [h_toList]
-    simp
-  have h_a_mem : a ∈ ((p start) memo input).1.getD split [] := by
-    rw [Std.HashMap.getD_eq_getD_getElem?]
-    simp [h_get, h_values]
-  have h_split_bounds :
-      start ≤ split ∧ split ≤ input.size :=
-    h_p_bounded memo h_memo start split h_start a h_a_mem
-  let memoPrefix : MemoData (tag cfg) List :=
-    ((Traversable.foldl joinUnderCache
-      (List.foldl (Traversable.foldl joinUnderCache)
-        (pure Std.HashMap.emptyWithCapacity)
-        (List.map
-          (fun pair : ℕ × List δ =>
-            match pair with
-            | (j, values) => List.map (fun a => (k a).lower j) values)
-          prePairs))
-      (List.map (fun a => (k a).lower split) preValues))
-      (↑((p start) memo input).2) input).2.val
-  have h_prefix_wf :
-      memo_wellFormed cfg input memoPrefix := by
-    simpa [memoPrefix] using
-      (bind_action_prefix_memo_wellFormed
-        (cfg := cfg) (input := input)
-        (p := p) (k := k)
-        (prePairs := prePairs) (preValues := preValues)
-        (split := split) (start := start)
-        (memo := memo) h_p_memo h_k_memo h_memo)
-  have h_action' :
-      tree ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
-    simpa [memoPrefix] using h_action
-  have h_tail_bounds :
-      split ≤ end_ ∧ end_ ≤ input.size :=
-    h_k_bounded a memoPrefix h_prefix_wf split end_
-      h_split_bounds.2 tree h_action'
-  exact ⟨Nat.le_trans h_split_bounds.1 h_tail_bounds.1, h_tail_bounds.2⟩
-
-omit [Fintype ν] in
-theorem lower_bind_constructor_sound
-  {cfg : @CFG α ν} {δ : Type u}
-  {input : Array α} {n : ν}
-  (p : Parser (tag := tag cfg) α List δ)
-  (k : δ → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (h_p_bounded :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start split : ℕ,
-      start ≤ input.size →
-      ∀ a : δ, a ∈ ((p start) memo input).1.getD split [] →
-        start ≤ split ∧ split ≤ input.size)
-  (h_p_memo :
-    ∀ start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input (((p start) memo input).2.val))
-  (h_k_sound : ∀ a, lower_sound cfg n (k a) input)
-  (h_k_bounded : ∀ a, lower_result_bounded cfg (k a) input)
-  (h_k_memo : ∀ a, lower_memo_wellFormed cfg (k a) input) :
-    lower_sound cfg n (ParserM.Bind p k) input := by
-  intro memo h_memo start end_ h_bound tree h_mem
-  obtain ⟨prePairs, _postPairs, split, values, preValues, _postValues, a,
-    h_toList, h_values, h_action⟩ :=
-    mem_lower_bind_exists_action_split_mem
-      (tag := tag cfg) (β := α)
-      (p := p) (k := k)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_) (x := tree) h_mem
-  have h_get : ((p start) memo input).1[split]? = some values := by
-    rw [← Std.HashMap.mem_toList_iff_getElem?_eq_some]
-    rw [h_toList]
-    simp
-  have h_a_mem : a ∈ ((p start) memo input).1.getD split [] := by
-    rw [Std.HashMap.getD_eq_getD_getElem?]
-    simp [h_get, h_values]
-  have h_split_bounds :
-      start ≤ split ∧ split ≤ input.size :=
-    h_p_bounded memo h_memo start split
-      (Nat.le_trans h_bound.1 h_bound.2) a h_a_mem
-  let memoPrefix : MemoData (tag cfg) List :=
-    ((Traversable.foldl joinUnderCache
-      (List.foldl (Traversable.foldl joinUnderCache)
-        (pure Std.HashMap.emptyWithCapacity)
-        (List.map
-          (fun pair : ℕ × List δ =>
-            match pair with
-            | (j, values) => List.map (fun a => (k a).lower j) values)
-          prePairs))
-      (List.map (fun a => (k a).lower split) preValues))
-      (↑((p start) memo input).2) input).2.val
-  have h_prefix_wf :
-      memo_wellFormed cfg input memoPrefix := by
-    simpa [memoPrefix] using
-      (bind_action_prefix_memo_wellFormed
-        (cfg := cfg) (input := input)
-        (p := p) (k := k)
-        (prePairs := prePairs) (preValues := preValues)
-        (split := split) (start := start)
-        (memo := memo) h_p_memo h_k_memo h_memo)
-  have h_action' :
-      tree ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
-    simpa [memoPrefix] using h_action
-  have h_tail_bounds :
-      split ≤ end_ ∧ end_ ≤ input.size :=
-    h_k_bounded a memoPrefix h_prefix_wf split end_
-      h_split_bounds.2 tree h_action'
-  exact h_k_sound a memoPrefix h_prefix_wf split end_
-    h_tail_bounds tree h_action'
 
 omit [Fintype ν] in
 theorem lower_sup_memo_wellFormed
@@ -2197,43 +1901,6 @@ theorem memo_wellFormed_memoizeStep
         (n := n) (memo := memo) (start := start)
         (cached := cached) h_memo h_lookup
 
-set_option linter.unusedSectionVars false in
-theorem lower_sound_memoizeStep_lift
-  {cfg : @CFG α ν} {input : Array α}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (next : ℕ → (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  {n : ν}
-  (h_compute :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start : ℕ,
-      ∀ _h_no_cache :
-        (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-        resultMap_sound cfg n
-          ((((g (next (input.size - start + 1)) n).lower start)
-            memo input).1)) :
-    lower_sound cfg n
-      (ParserM.lift (memoizeStep counter g n next)) input := by
-  intro memo h_memo start end_ _h_bound tree h_mem
-  have h_mem_step :
-      tree ∈ (memoizeStep counter g n next start memo input).1.getD end_ [] :=
-    mem_lower_lift_exists_of_mem
-      (tag := tag cfg) (β := α)
-      (p := memoizeStep counter g n next)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_) (x := tree) h_mem
-  have h_sound :
-      resultMap_sound cfg n
-        (memoizeStep counter g n next start memo input).1 :=
-    resultMap_sound_memoizeStep
-      (cfg := cfg) (input := input)
-      (counter := counter) (g := g) (next := next)
-      (n := n) (memo := memo) (start := start)
-      h_memo.1
-      (fun h_no_cache => h_compute memo h_memo start h_no_cache)
-  exact h_sound end_ tree h_mem_step
 
 set_option linter.unusedSectionVars false in
 theorem lower_result_sound_memoizeStep_lift
@@ -2389,99 +2056,6 @@ theorem memo_wellFormed_memoizeStep_of_guarded_body
     h_memo
     (fun h_no_cache => h_body memo h_memo start h_no_cache)
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] in
-lemma mem_zip_index_pair
-  {xs : List α} {ys : List β}
-  (h_len : xs.length = ys.length)
-  {x : α} {y : β}
-  (h_mem : (x, y) ∈ xs.zip ys)
-  : ∃ i : Fin xs.length, xs[i] = x ∧ ys[i] = y := by
-  obtain ⟨i, hi⟩ := List.mem_iff_get.mp h_mem
-  have h_len_zip : (xs.zip ys).length = xs.length := by
-    simp [List.length_zip, h_len]
-  let i' : Fin xs.length := ⟨i.1, by simpa [h_len_zip] using i.2⟩
-  refine ⟨i', ?_, ?_⟩
-  · have hfst := congrArg Prod.fst hi
-    simpa [i', h_len_zip] using hfst
-  · have hsnd := congrArg Prod.snd hi
-    simpa [i', h_len_zip] using hsnd
-
--- Traversal and parser-constructor lemmas used by generated-parser soundness.
-omit [BEq α] [Hashable ν] [Fintype ν] [DecidableEq α] [DecidableEq ν] in
-lemma mem_zip_index
-  {rule : List (Symbol α ν)} {subtrees : List (ParseTree (α := α) cfg)}
-  (h_len : rule.length = subtrees.length)
-  {a : ν} {n : ν} {rule' : { rule // rule ∈ cfg.rules n }} {children' : List (ParseTree cfg)}
-  (h_mem : (Symbol.nonterm a, Node n rule' children') ∈ rule.zip subtrees)
-  : ∃ i : Fin rule.length, rule[i] = Symbol.nonterm a ∧ subtrees[i] = Node n rule' children' := by
-  exact mem_zip_index_pair h_len h_mem
-
-omit [Fintype ν] in
-lemma mem_bind_cons_map_exists_of_cons
-  {cfg : @CFG α ν}
-  {γ : Type u} [DecidableEq γ]
-  {tail : List (ParserM (tag := tag cfg) α List γ)}
-  {input : Array α} {split end_ : ℕ}
-  {s : List γ} {result_head : γ} {result_tail : List γ}
-  (h :
-    result_head :: result_tail ∈
-      s >>= fun a =>
-        (runParser (tag := tag cfg)
-          (List.cons a <$> List.traverse id tail) input split).1[end_]?.toList.flatten) :
-    ∃ head_result,
-      head_result ∈ s ∧
-      result_head = head_result ∧
-      result_tail ∈
-        (runParser (tag := tag cfg) (List.traverse id tail) input split).1.getD end_ [] := by
-  rw [List.bind_eq_flatMap] at h
-  obtain ⟨head_result, h_head_mem, h_mapped⟩ := List.mem_flatMap.mp h
-  have h_mapped_getD :
-      result_head :: result_tail ∈
-        (runParser (tag := tag cfg)
-          (List.cons head_result <$> List.traverse id tail) input split).1.getD end_ [] := by
-    exact mem_resultMap_getD_of_mem_getElem?_toList_flatten
-      ((runParser (tag := tag cfg)
-        (List.cons head_result <$> List.traverse id tail) input split).1)
-      h_mapped
-  obtain ⟨tail_result, h_tail_mem, h_eq⟩ := mem_runParser_map_exists_of_mem
-    (tag := tag cfg) (β := α)
-    (p := List.traverse id tail)
-    (f := List.cons head_result)
-    (input := input) (start := split) (end_pos := end_)
-    (y := result_head :: result_tail) h_mapped_getD
-  cases h_eq
-  exact ⟨result_head, h_head_mem, rfl, h_tail_mem⟩
-
-omit [Fintype ν] in
-lemma not_mem_bind_cons_map_nil
-  {cfg : @CFG α ν}
-  {γ : Type u} [DecidableEq γ]
-  {tail : List (ParserM (tag := tag cfg) α List γ)}
-  {input : Array α} {split end_ : ℕ}
-  {s : List γ}
-  (h :
-    ([] : List γ) ∈
-      s >>= fun a =>
-        (runParser (tag := tag cfg)
-          (List.cons a <$> List.traverse id tail) input split).1[end_]?.toList.flatten) :
-    False := by
-  rw [List.bind_eq_flatMap] at h
-  obtain ⟨head_result, _h_head_mem, h_mapped⟩ := List.mem_flatMap.mp h
-  have h_mapped_getD :
-      ([] : List γ) ∈
-        (runParser (tag := tag cfg)
-          (List.cons head_result <$> List.traverse id tail) input split).1.getD end_ [] := by
-    exact mem_resultMap_getD_of_mem_getElem?_toList_flatten
-      ((runParser (tag := tag cfg)
-        (List.cons head_result <$> List.traverse id tail) input split).1)
-      h_mapped
-  obtain ⟨tail_result, _h_tail_mem, h_eq⟩ := mem_runParser_map_exists_of_mem
-    (tag := tag cfg) (β := α)
-    (p := List.traverse id tail)
-    (f := List.cons head_result)
-    (input := input) (start := split) (end_pos := end_)
-    (y := ([] : List γ)) h_mapped_getD
-  cases h_eq
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma valid_node_terminal_child
@@ -2680,66 +2254,6 @@ omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 abbrev forestLeaves {cfg : @CFG α ν} (children : List (ParseTree cfg)) : List α :=
   children.flatMap fun node => node.leaves
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-lemma forestLeaves_nil {cfg : @CFG α ν} :
-    forestLeaves (cfg := cfg) [] = [] := by
-  rfl
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-lemma forestLeaves_cons {cfg : @CFG α ν}
-  (tree : ParseTree cfg) (children : List (ParseTree cfg)) :
-    forestLeaves (cfg := cfg) (tree :: children) =
-      tree.leaves ++ forestLeaves (cfg := cfg) children := by
-  simp [forestLeaves]
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-lemma forestLeaves_append {cfg : @CFG α ν}
-  (left right : List (ParseTree cfg)) :
-    forestLeaves (cfg := cfg) (left ++ right) =
-      forestLeaves (cfg := cfg) left ++ forestLeaves (cfg := cfg) right := by
-  simp [forestLeaves, List.flatMap_append]
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma input_eq_child_span_of_mem
-  {cfg : @CFG α ν} {input : Array α}
-  {children : List (ParseTree cfg)} {child : ParseTree cfg}
-  {pre post : List α}
-  (h_mem : child ∈ children)
-  (h_input : input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post) :
-    ∃ before after : List (ParseTree cfg),
-      children = before ++ child :: after ∧
-      input.toList =
-        (pre ++ forestLeaves (cfg := cfg) before) ++
-          child.leaves ++
-          (forestLeaves (cfg := cfg) after ++ post) := by
-  obtain ⟨before, after, h_children⟩ := List.mem_iff_append.mp h_mem
-  refine ⟨before, after, h_children, ?_⟩
-  subst children
-  simpa [forestLeaves, List.append_assoc] using h_input
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma child_span_bounds_of_mem
-  {cfg : @CFG α ν} {input : Array α}
-  {children : List (ParseTree cfg)} {child : ParseTree cfg}
-  {pre post : List α}
-  (h_mem : child ∈ children)
-  (h_input : input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post) :
-    ∃ childPre childPost : List α,
-      input.toList = childPre ++ child.leaves ++ childPost ∧
-      pre.length ≤ childPre.length ∧
-      childPre.length + child.leaves.length ≤
-        pre.length + (forestLeaves (cfg := cfg) children).length := by
-  obtain ⟨before, after, h_children, h_child_input⟩ :=
-    input_eq_child_span_of_mem (cfg := cfg) h_mem h_input
-  refine ⟨pre ++ forestLeaves (cfg := cfg) before,
-    forestLeaves (cfg := cfg) after ++ post, h_child_input, ?_, ?_⟩
-  · simp
-  · subst children
-    simp [forestLeaves, List.length_append]
-    omega
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma list_middle_eq_drop_take
@@ -2780,34 +2294,6 @@ abbrev nodeSpanVisit {cfg : @CFG α ν}
   (n : ν) (start : ℕ) (tree : ParseTree cfg) : SpanVisit ν :=
   (n, start, start + tree.leaves.length)
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-theorem nodeSpanVisit_fst {cfg : @CFG α ν}
-  (n : ν) (start : ℕ) (tree : ParseTree cfg) :
-    (nodeSpanVisit n start tree).1 = n := by
-  rfl
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-theorem nodeSpanVisit_start {cfg : @CFG α ν}
-  (n : ν) (start : ℕ) (tree : ParseTree cfg) :
-    (nodeSpanVisit n start tree).2.1 = start := by
-  rfl
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-theorem nodeSpanVisit_end {cfg : @CFG α ν}
-  (n : ν) (start : ℕ) (tree : ParseTree cfg) :
-    (nodeSpanVisit n start tree).2.2 = start + tree.leaves.length := by
-  rfl
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-theorem nodeSpanVisit_budget_default_eq
-  {cfg : @CFG α ν} {input : Array α}
-  (n : ν) (start : ℕ) (tree : ParseTree cfg) :
-    input.size - (nodeSpanVisit n start tree).2.1 + 1 =
-      input.size - start + 1 := by
-  rfl
 
 mutual
   inductive AdmissibleTreeWith
@@ -2888,6 +2374,92 @@ abbrev lower_memo_complete (cfg : @CFG α ν)
   memo_complete cfg input memo →
   ∀ start : ℕ,
     memo_complete cfg input (((p.lower start) memo input).2.val)
+
+private abbrev GeneratedFamily (cfg : @CFG α ν) :=
+  (n : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)
+
+private abbrev GeneratedGenerator (cfg : @CFG α ν) :=
+  GeneratedFamily cfg → GeneratedFamily cfg
+
+private abbrev memoizedBody
+    (cfg : @CFG α ν) (input : Array α)
+    (counter : Counter ν) (g : GeneratedGenerator cfg)
+    (n : ν) (start : ℕ) : ParserM (tag := tag cfg) α List (ParseTree cfg) :=
+  g (memoize (counter.dec n (input.size - start + 1)) g) n
+
+private abbrev GeneratedBodySafety
+    (cfg : @CFG α ν) (input : Array α)
+    (counter : Counter ν) (g : GeneratedGenerator cfg) : Prop :=
+  ∀ n,
+    counter[n]? ≠ some 0 →
+    ∀ memo : MemoData (tag cfg) List,
+      memo_wellFormed cfg input memo →
+      ∀ start : ℕ,
+      ∀ _h_no_cache :
+        (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+        memo_wellFormed cfg input
+            ((((memoizedBody cfg input counter g n start).lower start)
+              memo input).2.val) ∧
+          resultMap_sound cfg n
+            ((((memoizedBody cfg input counter g n start).lower start)
+              memo input).1) ∧
+          resultMap_bounded cfg input start
+            ((((memoizedBody cfg input counter g n start).lower start)
+              memo input).1)
+
+private abbrev GeneratedFamilySafety
+    (cfg : @CFG α ν) (input : Array α)
+    (parser : GeneratedFamily cfg) : Prop :=
+  ∀ n,
+    lower_result_sound cfg n (parser n) input ∧
+      lower_result_bounded cfg (parser n) input ∧
+      lower_memo_wellFormed cfg (parser n) input
+
+private abbrev GeneratedSoundCounterInvariant
+    (cfg : @CFG α ν) (counter : Counter ν)
+    (parser : GeneratedFamily cfg) : Prop :=
+  ∀ input,
+    GeneratedFamilySafety cfg input parser ∧
+      GeneratedBodySafety cfg input counter (gen' (μ := List) cfg)
+
+private abbrev GeneratedBodyCompleteness
+    (cfg : @CFG α ν) (input : Array α)
+    (counter : Counter ν) (g : GeneratedGenerator cfg) : Prop :=
+  ∀ n,
+    counter[n]? ≠ some 0 →
+    ∀ memo : MemoData (tag cfg) List,
+      memo_complete cfg input memo →
+      ∀ start : ℕ,
+      ∀ _h_no_cache :
+        (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
+        memo_complete cfg input
+            ((((memoizedBody cfg input counter g n start).lower start)
+              memo input).2.val) ∧
+          resultMap_complete cfg input n (Counter.toKey counter) start
+            ((((memoizedBody cfg input counter g n start).lower start)
+              memo input).1)
+
+private abbrev GeneratedTreeCompleteness
+    (cfg : @CFG α ν) (input : Array α)
+    (counter : Counter ν) (parser : GeneratedFamily cfg) : Prop :=
+  ∀ {n : ν} {memo : MemoData (tag cfg) List}
+    {pre post : List α} {seen : List (SpanVisit ν)}
+    {tree : ParseTree cfg},
+    memo_complete cfg input memo →
+    tree.root = Symbol.nonterm n →
+    AdmissibleTreeWith cfg input seen counter tree pre.length →
+    tree.Valid →
+    input.toList = pre ++ tree.leaves ++ post →
+    tree ∈
+      (((parser n).lower pre.length) memo input).1.getD
+        (pre.length + tree.leaves.length) []
+
+private abbrev GeneratedCompleteCounterInvariant
+    (cfg : @CFG α ν) (input : Array α)
+    (counter : Counter ν) (parser : GeneratedFamily cfg) : Prop :=
+  (∀ n, lower_memo_complete cfg (parser n) input) ∧
+    GeneratedBodyCompleteness cfg input counter (gen' (μ := List) cfg) ∧
+    GeneratedTreeCompleteness cfg input counter parser
 
 omit [Fintype ν] in
 theorem lower_map_memo_complete
@@ -3224,60 +2796,6 @@ theorem bind_action_prefix_memo_complete
     (↑((p start) memo input).2)
     h_after_p
 
-omit [Fintype ν] in
-theorem mem_lower_bind_exists_action_split_complete
-  {cfg : @CFG α ν} {δ γ : Type u} [DecidableEq γ]
-  {input : Array α}
-  (p : Parser (tag := tag cfg) α List δ)
-  (k : δ → ParserM (tag := tag cfg) α List γ)
-  {memo : MemoData (tag cfg) List} {start end_ : ℕ} {x : γ}
-  (h_p :
-    ∀ start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_complete cfg input memo →
-        memo_complete cfg input (((p start) memo input).2.val))
-  (h_k : ∀ a, lower_memo_complete cfg (k a) input)
-  (h_memo : memo_complete cfg input memo)
-  (h :
-    x ∈ (((ParserM.Bind p k).lower start) memo input).1.getD end_ []) :
-    ∃ split a memoPrefix,
-      memo_complete cfg input memoPrefix ∧
-      x ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
-  obtain ⟨prePairs, _postPairs, split, _values, preValues, _postValues, a,
-    _h_toList, _h_values, h_action⟩ :=
-    mem_lower_bind_exists_action_split_mem
-      (tag := tag cfg) (β := α)
-      (p := p) (k := k)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_) (x := x) h
-  let memoPrefix : MemoData (tag cfg) List :=
-    ((Traversable.foldl joinUnderCache
-      (List.foldl (Traversable.foldl joinUnderCache)
-        (pure Std.HashMap.emptyWithCapacity)
-        (List.map
-          (fun pair : ℕ × List δ =>
-            match pair with
-              | (j, values) => List.map (fun a => (k a).lower j) values)
-          prePairs))
-      (List.map (fun a => (k a).lower split) preValues))
-      (↑((p start) memo input).2) input).2.val
-  have h_prefix :
-      memo_complete cfg input memoPrefix := by
-    intro n counter pre post seen tree resultMap h_cache h_root h_adm
-      h_valid h_input
-    exact
-      (bind_action_prefix_memo_complete
-        (cfg := cfg) (input := input)
-        (p := p) (k := k)
-        (prePairs := prePairs) (preValues := preValues)
-        (split := split) (start := start)
-        (memo := memo) (h_p := h_p) (h_k := h_k) (h_memo := h_memo))
-        (by simpa [memoPrefix] using h_cache)
-        h_root h_adm h_valid h_input
-  have h_action' :
-      x ∈ (((k a).lower split) memoPrefix input).1.getD end_ [] := by
-    simpa [memoPrefix] using h_action
-  exact ⟨split, a, memoPrefix, h_prefix, h_action'⟩
 
 omit [Fintype ν] in
 theorem parser_pure_memo_complete
@@ -3458,487 +2976,62 @@ theorem memo_complete_empty (cfg : @CFG α ν) (input : Array α) :
   intro n counter pre post seen tree resultMap h_cache _h_root _h_adm _h_valid _h_input
   simp [startState, Bot.bot] at h_cache
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem resultMap_complete_of_memo_complete_getElem?
-  {cfg : @CFG α ν} {input : Array α}
-  {memo : MemoData (tag cfg) List}
-  {n : ν} {key : MemoKey ν} {start : ℕ}
-  {resultMap : ResultMap List (ParseTree cfg)}
-  (h_memo : memo_complete cfg input memo)
-  (h_cache : (memo.getD n ⊥)[(key, start)]? = some resultMap) :
-    resultMap_complete cfg input n key start resultMap := by
-  intro counter pre post seen tree h_key h_start h_root h_adm h_valid h_input
-  exact h_memo
-    (by simpa [h_key, h_start] using h_cache)
-    h_root h_adm h_valid h_input
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem resultMap_complete_of_quot_eq
-  {cfg : @CFG α ν} {input : Array α}
-  {n : ν} {key : MemoKey ν} {start : ℕ}
-  {left right : ResultMap List (ParseTree cfg)}
-  (h_eq :
-    Quotient.mk (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg))) left =
-      Quotient.mk (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg))) right)
-  (h_right : resultMap_complete cfg input n key start right) :
-    resultMap_complete cfg input n key start left := by
-  intro counter pre post seen tree h_key h_start h_root h_adm h_valid h_input
-  have h_mem := h_right h_key h_start h_root h_adm h_valid h_input
-  have h_equiv :
-      Std.HashMap.EquivQuot
-        (s := List.memSetoid (ParseTree cfg)) left right :=
-    Quotient.exact h_eq
-  have h_getD := Std.HashMap.EquivQuot.getD_eq
-    (s := List.memSetoid (ParseTree cfg))
-    (k := pre.length + tree.leaves.length) (fallback := []) h_equiv
-  simp [List.memSetoid, Subset, List.Subset] at h_getD
-  exact (@h_getD.2 tree h_mem)
-
-set_option linter.unusedSectionVars false in
-theorem resultMap_complete_unionSup_left
-  {cfg : @CFG α ν} {input : Array α}
-  {n : ν} {key : MemoKey ν} {start : ℕ}
-  {left right : ResultMap List (ParseTree cfg)}
-  (h_left : resultMap_complete cfg input n key start left) :
-    resultMap_complete cfg input n key start (left.unionSup right) := by
-  intro counter pre post seen tree h_key h_start h_root h_adm h_valid h_input
-  exact resultMap_mem_unionSup_left
-    (cfg := cfg) (left := left) (right := right)
-    (end_ := pre.length + tree.leaves.length) (tree := tree)
-    (h_left h_key h_start h_root h_adm h_valid h_input)
-
-set_option linter.unusedSectionVars false in
-theorem resultMap_complete_unionSup_right
-  {cfg : @CFG α ν} {input : Array α}
-  {n : ν} {key : MemoKey ν} {start : ℕ}
-  {left right : ResultMap List (ParseTree cfg)}
-  (h_right : resultMap_complete cfg input n key start right) :
-    resultMap_complete cfg input n key start (left.unionSup right) := by
-  intro counter pre post seen tree h_key h_start h_root h_adm h_valid h_input
-  exact resultMap_mem_unionSup_right
-    (cfg := cfg) (left := left) (right := right)
-    (end_ := pre.length + tree.leaves.length) (tree := tree)
-    (h_right h_key h_start h_root h_adm h_valid h_input)
-
-abbrev positionMap_complete (cfg : @CFG α ν) (input : Array α)
-  (n : ν)
-  (positionMap :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))) :=
-  ∀ {counter : Counter ν}
-    {pre post : List α} {seen : List (SpanVisit ν)}
-    {tree : ParseTree cfg},
-    (Counter.toKey counter, pre.length) ∈ positionMap →
-    tree.root = Symbol.nonterm n →
-    AdmissibleTreeWith cfg input seen counter tree pre.length →
-    tree.Valid →
-    input.toList = pre ++ tree.leaves ++ post →
-    tree ∈
-      (positionMap.getD (Counter.toKey counter, pre.length)
-        (Std.HashMap.emptyWithCapacity :
-          ResultMap List (ParseTree cfg))).getD
-        (pre.length + tree.leaves.length) []
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_complete_empty
-  (cfg : @CFG α ν) (input : Array α) (n : ν) :
-    positionMap_complete cfg input n
-      (Std.HashMap.emptyWithCapacity :
-        Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))) := by
-  intro counter pre post seen tree h_entry _h_root _h_adm _h_valid _h_input
-  simp at h_entry
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_getElem?_eq_some_getD_of_mem
-  {cfg : @CFG α ν}
-  {positionMap :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))}
-  {entry : MemoEntryKey ν}
-  (h_entry : entry ∈ positionMap) :
-    positionMap[entry]? =
-      some (positionMap.getD entry
-        (Std.HashMap.emptyWithCapacity :
-          ResultMap List (ParseTree cfg))) := by
-  have h_some : positionMap[entry]? = some positionMap[entry] := by
-    simp [h_entry]
-  simpa [Std.HashMap.getElem_eq_getD
-      (m := positionMap) (a := entry)
-      (fallback :=
-        (Std.HashMap.emptyWithCapacity :
-          ResultMap List (ParseTree cfg)))]
-    using h_some
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_complete_of_eq
-  {cfg : @CFG α ν} {input : Array α} {n : ν}
-  {left right :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))}
-  (h_eq : left = right)
-  (h_right : positionMap_complete cfg input n right) :
-    positionMap_complete cfg input n left := by
-  cases h_eq
-  exact h_right
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_complete_of_memo_complete
-  {cfg : @CFG α ν} {input : Array α}
-  {memo : MemoData (tag cfg) List}
-  (h_memo : memo_complete cfg input memo)
-  (n : ν) :
-    positionMap_complete cfg input n
-      (memo.getD n
-        (Std.HashMap.emptyWithCapacity :
-          Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))) := by
-  intro counter pre post seen tree h_entry h_root h_adm h_valid h_input
-  let positionMap :=
-    memo.getD n
-      (Std.HashMap.emptyWithCapacity :
-        Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))
-  let entry : MemoEntryKey ν := (Counter.toKey counter, pre.length)
-  let emptyResultMap : ResultMap List (ParseTree cfg) :=
-    Std.HashMap.emptyWithCapacity
-  have h_cache :
-      positionMap[entry]? =
-        some (positionMap.getD entry emptyResultMap) := by
-    simpa [positionMap, entry, emptyResultMap]
-      using positionMap_getElem?_eq_some_getD_of_mem
-        (cfg := cfg) (positionMap := positionMap) (entry := entry) h_entry
-  exact h_memo
-    (by simpa [positionMap, entry, emptyResultMap, Bot.bot] using h_cache)
-    h_root h_adm h_valid h_input
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_complete_sup
-  {cfg : @CFG α ν} {input : Array α} {n : ν}
-  {left right :
-    Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg))}
-  (h_left : positionMap_complete cfg input n left)
-  (h_right : positionMap_complete cfg input n right) :
-    positionMap_complete cfg input n (positionMapUnion cfg left right) := by
-  intro counter pre post seen tree h_entry h_root h_adm h_valid h_input
-  let entry : MemoEntryKey ν := (Counter.toKey counter, pre.length)
-  let emptyResultMap : ResultMap List (ParseTree cfg) :=
-    Std.HashMap.emptyWithCapacity
-  let end_ := pre.length + tree.leaves.length
-  have h_entry' : entry ∈ positionMapUnion cfg left right := by
-    simpa [entry] using h_entry
-  by_cases h_left_key : entry ∈ left
-  · by_cases h_right_key : entry ∈ right
-    · have h_left_mem :
-          tree ∈ (left.getD entry emptyResultMap).getD end_ [] := by
-        simpa [entry, emptyResultMap, end_] using
-          (h_left (counter := counter) (pre := pre) (post := post)
-            (seen := seen) (tree := tree) h_left_key
-            h_root h_adm h_valid h_input)
-      have h_union_mem :
-          tree ∈
-            ((left.getD entry emptyResultMap).unionSup
-              (right.getD entry emptyResultMap)).getD end_ [] :=
-        resultMap_mem_unionSup_left
-          (cfg := cfg)
-          (left := left.getD entry emptyResultMap)
-          (right := right.getD entry emptyResultMap)
-          (end_ := end_) (tree := tree) h_left_mem
-      have h_union := Std.HashMap.unionSup_getD_both
-        (s := Std.HashMap.isSetoid
-          (s := List.memSetoid (ParseTree cfg)))
-        (semi := Std.HashMap.instSemilatticeoidIsSetoid
-          (s := List.memSetoid (ParseTree cfg))
-          (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (m₁ := left) (m₂ := right) h_left_key h_right_key
-      have h_eq :
-          Quotient.mk
-              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
-              ((positionMapUnion cfg left right).getD entry emptyResultMap) =
-            Quotient.mk
-              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
-              ((left.getD entry emptyResultMap).unionSup
-                (right.getD entry emptyResultMap)) := by
-        simpa [positionMapUnion, emptyResultMap, Max.max,
-          Std.HashMap.getElem_eq_getD
-            (m := left) (a := entry) (fallback := emptyResultMap),
-          Std.HashMap.getElem_eq_getD
-            (m := right) (a := entry) (fallback := emptyResultMap)]
-          using h_union
-      have h_equiv :
-          Std.HashMap.EquivQuot
-            (s := List.memSetoid (ParseTree cfg))
-            ((positionMapUnion cfg left right).getD entry emptyResultMap)
-            ((left.getD entry emptyResultMap).unionSup
-              (right.getD entry emptyResultMap)) :=
-        Quotient.exact h_eq
-      have h_getD := Std.HashMap.EquivQuot.getD_eq
-        (s := List.memSetoid (ParseTree cfg))
-        (k := end_) (fallback := []) h_equiv
-      simp [List.memSetoid, Subset, List.Subset] at h_getD
-      exact (@h_getD.2 tree h_union_mem)
-    · have h_left_mem :
-          tree ∈ (left.getD entry emptyResultMap).getD end_ [] := by
-        simpa [entry, emptyResultMap, end_] using
-          (h_left (counter := counter) (pre := pre) (post := post)
-            (seen := seen) (tree := tree) h_left_key
-            h_root h_adm h_valid h_input)
-      have h_union := Std.HashMap.unionSup_getD_of_right_not_contains
-        (s := Std.HashMap.isSetoid
-          (s := List.memSetoid (ParseTree cfg)))
-        (semi := Std.HashMap.instSemilatticeoidIsSetoid
-          (s := List.memSetoid (ParseTree cfg))
-          (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (fallback := emptyResultMap) left right h_right_key
-      have h_eq :
-          Quotient.mk
-              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
-              ((positionMapUnion cfg left right).getD entry emptyResultMap) =
-            Quotient.mk
-              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
-              (left.getD entry emptyResultMap) := by
-        simpa [positionMapUnion, emptyResultMap] using h_union
-      have h_equiv :
-          Std.HashMap.EquivQuot
-            (s := List.memSetoid (ParseTree cfg))
-            ((positionMapUnion cfg left right).getD entry emptyResultMap)
-            (left.getD entry emptyResultMap) :=
-        Quotient.exact h_eq
-      have h_getD := Std.HashMap.EquivQuot.getD_eq
-        (s := List.memSetoid (ParseTree cfg))
-        (k := end_) (fallback := []) h_equiv
-      simp [List.memSetoid, Subset, List.Subset] at h_getD
-      exact (@h_getD.2 tree h_left_mem)
-  · by_cases h_right_key : entry ∈ right
-    · have h_right_mem :
-          tree ∈ (right.getD entry emptyResultMap).getD end_ [] := by
-        simpa [entry, emptyResultMap, end_] using
-          (h_right (counter := counter) (pre := pre) (post := post)
-            (seen := seen) (tree := tree) h_right_key
-            h_root h_adm h_valid h_input)
-      have h_union := Std.HashMap.unionSup_getD_of_not_contains
-        (s := Std.HashMap.isSetoid
-          (s := List.memSetoid (ParseTree cfg)))
-        (semi := Std.HashMap.instSemilatticeoidIsSetoid
-          (s := List.memSetoid (ParseTree cfg))
-          (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-        (fallback := emptyResultMap) left right h_left_key
-      have h_eq :
-          Quotient.mk
-              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
-              ((positionMapUnion cfg left right).getD entry emptyResultMap) =
-            Quotient.mk
-              (Std.HashMap.isSetoid (s := List.memSetoid (ParseTree cfg)))
-              (right.getD entry emptyResultMap) := by
-        simpa [positionMapUnion, emptyResultMap] using h_union
-      have h_equiv :
-          Std.HashMap.EquivQuot
-            (s := List.memSetoid (ParseTree cfg))
-            ((positionMapUnion cfg left right).getD entry emptyResultMap)
-            (right.getD entry emptyResultMap) :=
-        Quotient.exact h_eq
-      have h_getD := Std.HashMap.EquivQuot.getD_eq
-        (s := List.memSetoid (ParseTree cfg))
-        (k := end_) (fallback := []) h_equiv
-      simp [List.memSetoid, Subset, List.Subset] at h_getD
-      exact (@h_getD.2 tree h_right_mem)
-    · have h_mem_or : entry ∈ left ∨ entry ∈ right := by
-        have h := (Std.HashMap.mem_of_unionSup_mem
-          (s := Std.HashMap.isSetoid
-            (s := List.memSetoid (ParseTree cfg)))
-          (semi := Std.HashMap.instSemilatticeoidIsSetoid
-            (s := List.memSetoid (ParseTree cfg))
-            (semi := List.instSemilatticeAlt.instSemilatticeoidInstSetoid))
-          (m₁ := left) (m₂ := right)
-          (k := entry)).mp (by simpa [positionMapUnion] using h_entry')
-        exact h
-      cases h_mem_or with
-      | inl h_mem => exact False.elim (h_left_key h_mem)
-      | inr h_mem => exact False.elim (h_right_key h_mem)
-
-set_option linter.unusedSectionVars false in
-theorem positionMap_complete_of_memo_complete_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right : MemoData (tag cfg) List}
-  (h_left : memo_complete cfg input left)
-  (h_right : memo_complete cfg input right)
-  (n : ν) :
-    positionMap_complete cfg input n
-      ((left ⊔ right).getD n
-        (Std.HashMap.emptyWithCapacity :
-          Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)))) := by
-  let emptyPositionMap :
-      Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)) :=
-    Std.HashMap.emptyWithCapacity
-  change positionMap_complete cfg input n
-    ((Std.DHashMap.unionWith
-      (fun _ => positionMapUnion cfg)
-      (fun _ => emptyPositionMap)
-      left right).getD n emptyPositionMap)
-  by_cases h_left_n : n ∈ left
-  · by_cases h_right_n : n ∈ right
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_both
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_left_n h_right_n]
-      exact positionMap_complete_sup
-        (cfg := cfg) (input := input) (n := n)
-        (by
-          intro counter pre post seen tree h_entry h_root h_adm h_valid h_input
-          have h_pos :
-              positionMap_complete cfg input n
-                (left.getD n emptyPositionMap) :=
-            positionMap_complete_of_memo_complete
-              (cfg := cfg) (input := input) (memo := left) h_left n
-          have h_eq :
-              left.get n h_left_n = left.getD n emptyPositionMap :=
-            Std.DHashMap.get_eq_getD
-              (m := left) (a := n) (fallback := emptyPositionMap)
-              (h := h_left_n)
-          have h_entry_getD :
-              (Counter.toKey counter, pre.length) ∈
-                left.getD n emptyPositionMap := by
-            simpa [← h_eq] using h_entry
-          have h_mem :=
-            h_pos (counter := counter) (pre := pre) (post := post)
-              (seen := seen) (tree := tree)
-              h_entry_getD h_root h_adm h_valid h_input
-          simpa [← h_eq] using h_mem)
-        (by
-          intro counter pre post seen tree h_entry h_root h_adm h_valid h_input
-          have h_pos :
-              positionMap_complete cfg input n
-                (right.getD n emptyPositionMap) :=
-            positionMap_complete_of_memo_complete
-              (cfg := cfg) (input := input) (memo := right) h_right n
-          have h_eq :
-              right.get n h_right_n = right.getD n emptyPositionMap :=
-            Std.DHashMap.get_eq_getD
-              (m := right) (a := n) (fallback := emptyPositionMap)
-              (h := h_right_n)
-          have h_entry_getD :
-              (Counter.toKey counter, pre.length) ∈
-                right.getD n emptyPositionMap := by
-            simpa [← h_eq] using h_entry
-          have h_mem :=
-            h_pos (counter := counter) (pre := pre) (post := post)
-              (seen := seen) (tree := tree)
-              h_entry_getD h_root h_adm h_valid h_input
-          simpa [← h_eq] using h_mem)
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_not_contains_right
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_right_n]
-      rw [Std.DHashMap.get?_eq_some_get h_left_n]
-      exact positionMap_complete_sup
-        (cfg := cfg) (input := input) (n := n)
-        (by
-          intro counter pre post seen tree h_entry h_root h_adm h_valid h_input
-          have h_pos :
-              positionMap_complete cfg input n
-                (left.getD n emptyPositionMap) :=
-            positionMap_complete_of_memo_complete
-              (cfg := cfg) (input := input) (memo := left) h_left n
-          have h_eq :
-              left.get n h_left_n = left.getD n emptyPositionMap :=
-            Std.DHashMap.get_eq_getD
-              (m := left) (a := n) (fallback := emptyPositionMap)
-              (h := h_left_n)
-          have h_entry_getD :
-              (Counter.toKey counter, pre.length) ∈
-                left.getD n emptyPositionMap := by
-            simpa [← h_eq] using h_entry
-          have h_mem :=
-            h_pos (counter := counter) (pre := pre) (post := post)
-              (seen := seen) (tree := tree)
-              h_entry_getD h_root h_adm h_valid h_input
-          simpa [← h_eq] using h_mem)
-        (positionMap_complete_empty cfg input n)
-  · by_cases h_right_n : n ∈ right
-    · rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [Std.DHashMap.unionWith_getElem_not_contains
-        (m₁ := left) (m₂ := right)
-        (f := fun _ => positionMapUnion cfg)
-        (z := fun _ => emptyPositionMap)
-        h_left_n]
-      rw [Std.DHashMap.get?_eq_some_get h_right_n]
-      exact positionMap_complete_sup
-        (cfg := cfg) (input := input) (n := n)
-        (positionMap_complete_empty cfg input n)
-        (by
-          intro counter pre post seen tree h_entry h_root h_adm h_valid h_input
-          have h_pos :
-              positionMap_complete cfg input n
-                (right.getD n emptyPositionMap) :=
-            positionMap_complete_of_memo_complete
-              (cfg := cfg) (input := input) (memo := right) h_right n
-          have h_eq :
-              right.get n h_right_n = right.getD n emptyPositionMap :=
-            Std.DHashMap.get_eq_getD
-              (m := right) (a := n) (fallback := emptyPositionMap)
-              (h := h_right_n)
-          have h_entry_getD :
-              (Counter.toKey counter, pre.length) ∈
-                right.getD n emptyPositionMap := by
-            simpa [← h_eq] using h_entry
-          have h_mem :=
-            h_pos (counter := counter) (pre := pre) (post := post)
-              (seen := seen) (tree := tree)
-              h_entry_getD h_root h_adm h_valid h_input
-          simpa [← h_eq] using h_mem)
-    · have h_union_none :
-          (Std.DHashMap.unionWith
-            (fun _ => positionMapUnion cfg)
-            (fun _ => emptyPositionMap)
-            left right).get? n = none := by
-        rw [Std.DHashMap.unionWith_getElem_not_contains
-          (m₁ := left) (m₂ := right)
-          (f := fun _ => positionMapUnion cfg)
-          (z := fun _ => emptyPositionMap)
-          h_left_n]
-        simp [Std.DHashMap.get?_eq_none, h_right_n]
-      rw [Std.DHashMap.getD_eq_getD_get?]
-      rw [h_union_none]
-      exact positionMap_complete_empty cfg input n
 
 theorem memo_complete_sup
-  {cfg : @CFG α ν} {input : Array α}
-  {left right : MemoData (tag cfg) List}
-  (h_left : memo_complete cfg input left)
-  (h_right : memo_complete cfg input right) :
+    {cfg : @CFG α ν} {input : Array α}
+    {left right : MemoData (tag cfg) List}
+    (h_left : memo_complete cfg input left)
+    (h_right : memo_complete cfg input right) :
     memo_complete cfg input (left ⊔ right) := by
-  intro n counter pre post seen tree resultMap h_cache h_root h_adm h_valid h_input
-  let emptyPositionMap :
-      Std.HashMap (MemoEntryKey ν) (ResultMap List (ParseTree cfg)) :=
-    Std.HashMap.emptyWithCapacity
-  let entry : MemoEntryKey ν := (Counter.toKey counter, pre.length)
-  let positionMap := (left ⊔ right).getD n emptyPositionMap
-  have h_cache_explicit : positionMap[entry]? = some resultMap := by
-    simpa [positionMap, entry, emptyPositionMap, Bot.bot] using h_cache
-  have h_entry : entry ∈ positionMap := by
-    by_contra h_not_mem
-    have h_none := Std.HashMap.getElem?_eq_none
-      (m := positionMap) (a := entry) h_not_mem
-    rw [h_cache_explicit] at h_none
-    simp at h_none
-  have h_getD_eq :
-      positionMap.getD entry
-          (Std.HashMap.emptyWithCapacity : ResultMap List (ParseTree cfg)) =
-        resultMap := by
-    rw [Std.HashMap.getD_eq_getD_getElem?]
-    rw [h_cache_explicit]
-    rfl
-  have h_position :
-      positionMap_complete cfg input n
-        ((left ⊔ right).getD n emptyPositionMap) :=
-    positionMap_complete_of_memo_complete_sup
-      (cfg := cfg) (input := input)
-      (left := left) (right := right) h_left h_right n
-  have h_mem :=
-    h_position (counter := counter) (pre := pre) (post := post)
-      (seen := seen) (tree := tree)
-      (by simpa [positionMap, entry, emptyPositionMap] using h_entry)
-      h_root h_adm h_valid h_input
-  rw [← h_getD_eq]
-  simpa [positionMap, entry, emptyPositionMap] using h_mem
+  let P :
+      (n : ν) → MemoEntryKey ν → ResultMap List (ParseTree cfg) → Prop :=
+    fun n entry resultMap =>
+      resultMap_complete cfg input n entry.1 entry.2 resultMap
+  have h_entries : MemoEntries cfg P (left ⊔ right) :=
+    memoEntries_sup
+      (P := P)
+      (by
+        intro n entry leftMap rightMap h_left _h_right
+        intro counter pre post seen tree h_key h_start h_root h_adm
+          h_valid h_input
+        exact resultMap_mem_unionSup_left
+          (h_left h_key h_start h_root h_adm h_valid h_input))
+      (by
+        intro n entry leftMap rightMap h_eq h_right
+        intro counter pre post seen tree h_key h_start h_root h_adm
+          h_valid h_input
+        have h_right_mem :=
+          h_right h_key h_start h_root h_adm h_valid h_input
+        have h_equiv :
+            Std.HashMap.EquivQuot
+              (s := List.memSetoid (ParseTree cfg)) leftMap rightMap :=
+          Quotient.exact h_eq
+        have h_getD := Std.HashMap.EquivQuot.getD_eq
+          (s := List.memSetoid (ParseTree cfg))
+          (k := pre.length + tree.leaves.length) (fallback := []) h_equiv
+        simp [List.memSetoid, Subset, List.Subset] at h_getD
+        exact @h_getD.2 tree h_right_mem)
+      (by
+        intro n entry resultMap h_cache
+        rcases entry with ⟨key, start⟩
+        intro counter pre post seen tree h_key h_start h_root h_adm
+          h_valid h_input
+        exact h_left
+          (by simpa [h_key, h_start] using h_cache)
+          h_root h_adm h_valid h_input)
+      (by
+        intro n entry resultMap h_cache
+        rcases entry with ⟨key, start⟩
+        intro counter pre post seen tree h_key h_start h_root h_adm
+          h_valid h_input
+        exact h_right
+          (by simpa [h_key, h_start] using h_cache)
+          h_root h_adm h_valid h_input)
+  intro n counter pre post seen tree resultMap h_cache h_root h_adm
+    h_valid h_input
+  exact
+    (h_entries n (Counter.toKey counter, pre.length) resultMap h_cache)
+      rfl rfl h_root h_adm h_valid h_input
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem memo_complete_memoWithCachedResult
@@ -4302,12 +3395,6 @@ theorem admissible_forest_cons_inv
   | cons _ _ h_child h_tail =>
       exact ⟨h_child, h_tail⟩
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_empty_getElem?_ne_zero (t : ν) :
-    (Counter.empty : Counter ν)[t]? ≠ some 0 := by
-  change (∅ : Std.HashMap ν ℕ)[t]? ≠ some 0
-  rw [Std.HashMap.getElem?_empty]
-  simp
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counter_dec_self_getElem?
@@ -4318,16 +3405,6 @@ theorem counter_dec_self_getElem?
   rw [Std.HashMap.getElem?_insert]
   simp
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_dec_self_getD
-  (counter : Counter ν) (t : ν) (fuel fallback : ℕ) :
-    (counter.dec t fuel).getD t fallback = counter.getD t fuel - 1 := by
-  rw [Std.HashMap.getD_eq_getD_getElem?]
-  change (((counter : Std.HashMap ν ℕ).insert t
-    (counter.getD t fuel - 1))[t]?).getD fallback =
-      counter.getD t fuel - 1
-  rw [Std.HashMap.getElem?_insert]
-  simp
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counter_dec_other_getElem?
@@ -4340,25 +3417,6 @@ theorem counter_dec_other_getElem?
   simp [h_ne]
   rfl
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_dec_other_getElem?_ne_zero
-  (counter : Counter ν) {t u : ν} (fuel : ℕ)
-  (h_ne : t ≠ u)
-  (h_nonzero : counter[u]? ≠ some 0) :
-    (counter.dec t fuel)[u]? ≠ some 0 := by
-  rw [counter_dec_other_getElem? (counter := counter) (t := t) (u := u)
-    (fuel := fuel) h_ne]
-  exact h_nonzero
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_dec_self_getElem?_ne_zero_of_two_le
-  (counter : Counter ν) (t : ν) (fuel : ℕ)
-  (h : 2 ≤ counter.getD t fuel) :
-    (counter.dec t fuel)[t]? ≠ some 0 := by
-  rw [counter_dec_self_getElem?]
-  intro h_zero
-  simp at h_zero
-  omega
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 def counterForSeen (input : Array α) : List (SpanVisit ν) → Counter ν
@@ -4366,20 +3424,6 @@ def counterForSeen (input : Array α) : List (SpanVisit ν) → Counter ν
   | visit :: seen =>
       (counterForSeen input seen).dec visit.1 (input.size - visit.2.1 + 1)
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-@[simp]
-theorem counterForSeen_nil (input : Array α) :
-    counterForSeen (ν := ν) input [] = (Counter.empty : Counter ν) := by
-  rfl
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-@[simp]
-theorem counterForSeen_cons
-  (input : Array α) (visit : SpanVisit ν) (seen : List (SpanVisit ν)) :
-    counterForSeen input (visit :: seen) =
-      (counterForSeen input seen).dec visit.1
-        (input.size - visit.2.1 + 1) := by
-  rfl
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counterForSeen_cons_self_getElem?
@@ -4401,28 +3445,6 @@ theorem counterForSeen_cons_other_getElem?
     (t := visit.1) (u := t)
     (fuel := input.size - visit.2.1 + 1) h_ne
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterForSeen_cons_other_getElem?_ne_zero
-  (input : Array α) (visit : SpanVisit ν) (seen : List (SpanVisit ν))
-  {t : ν} (h_ne : visit.1 ≠ t)
-  (h_nonzero : (counterForSeen input seen)[t]? ≠ some 0) :
-    (counterForSeen input (visit :: seen))[t]? ≠ some 0 := by
-  rw [counterForSeen_cons_other_getElem? (input := input)
-    (visit := visit) (seen := seen) (t := t) h_ne]
-  exact h_nonzero
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterForSeen_cons_self_getElem?_ne_zero_of_two_le
-  (input : Array α) (visit : SpanVisit ν) (seen : List (SpanVisit ν))
-  (h :
-    2 ≤ (counterForSeen input seen).getD visit.1
-      (input.size - visit.2.1 + 1)) :
-    (counterForSeen input (visit :: seen))[visit.1]? ≠ some 0 := by
-  rw [counterForSeen_cons]
-  exact counter_dec_self_getElem?_ne_zero_of_two_le
-    (counter := counterForSeen input seen)
-    (t := visit.1)
-    (fuel := input.size - visit.2.1 + 1) h
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 def spanVisitCount (t : ν) : List (SpanVisit ν) → ℕ
@@ -4430,19 +3452,6 @@ def spanVisitCount (t : ν) : List (SpanVisit ν) → ℕ
   | visit :: seen =>
       (if visit.1 = t then 1 else 0) + spanVisitCount t seen
 
-omit [BEq α] [DecidableEq α] [Hashable ν] [Fintype ν] in
-@[simp]
-theorem spanVisitCount_nil (t : ν) :
-    spanVisitCount t ([] : List (SpanVisit ν)) = 0 := by
-  rfl
-
-omit [BEq α] [DecidableEq α] [Hashable ν] [Fintype ν] in
-@[simp]
-theorem spanVisitCount_cons (t : ν) (visit : SpanVisit ν)
-  (seen : List (SpanVisit ν)) :
-    spanVisitCount t (visit :: seen) =
-      (if visit.1 = t then 1 else 0) + spanVisitCount t seen := by
-  rfl
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 def spanVisitInitialFuel (input : Array α) (t : ν) :
@@ -4475,28 +3484,6 @@ theorem spanVisitCount_eq_zero_of_initialFuel_none
       | some fuel =>
           simp [spanVisitInitialFuel, h_tail] at h_initial
 
-omit [BEq α] [DecidableEq α] [Hashable ν] [Fintype ν] in
-theorem spanVisitInitialFuel_some_mem
-  (input : Array α) (seen : List (SpanVisit ν)) (t : ν) {fuel : ℕ}
-  (h_initial : spanVisitInitialFuel input t seen = some fuel) :
-    ∃ visit, visit ∈ seen ∧ visit.1 = t ∧
-      fuel = input.size - visit.2.1 + 1 := by
-  induction seen generalizing fuel with
-  | nil =>
-      simp [spanVisitInitialFuel] at h_initial
-  | cons visit tail ih =>
-      cases h_tail : spanVisitInitialFuel input t tail with
-      | some tailFuel =>
-          simp [spanVisitInitialFuel, h_tail] at h_initial
-          subst fuel
-          obtain ⟨witness, h_mem, h_tag, h_fuel⟩ := ih h_tail
-          exact ⟨witness, by simp [h_mem], h_tag, h_fuel⟩
-      | none =>
-          by_cases h_tag : visit.1 = t
-          · simp [spanVisitInitialFuel, h_tail, h_tag] at h_initial
-            subst fuel
-            exact ⟨visit, by simp, h_tag, rfl⟩
-          · simp [spanVisitInitialFuel, h_tail, h_tag] at h_initial
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counterForSeen_getElem?_eq_initialFuel_sub_count
@@ -4579,18 +3566,6 @@ theorem counterForSeen_getElem?_ne_zero_of_initialFuel_count_lt
   simp [h_initial]
   omega
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_getD_mono_default
-  (counter : Counter ν) (t : ν) {fuel₁ fuel₂ : ℕ}
-  (h_le : fuel₁ ≤ fuel₂) :
-    counter.getD t fuel₁ ≤ counter.getD t fuel₂ := by
-  repeat rw [Std.HashMap.getD_eq_getD_getElem?]
-  change counter[t]?.getD fuel₁ ≤ counter[t]?.getD fuel₂
-  cases counter[t]? with
-  | none =>
-      exact h_le
-  | some value =>
-      rfl
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counter_getElem?_eq_of_toKey_eq
@@ -4634,15 +3609,6 @@ theorem counter_getElem?_eq_of_toKey_eq
           rw [h_left] at h_some
           contradiction
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_getD_eq_of_toKey_eq
-  {left right : Counter ν}
-  (h_key : Counter.toKey left = Counter.toKey right)
-  (t : ν) (fuel : ℕ) :
-    left.getD t fuel = right.getD t fuel := by
-  repeat rw [Std.HashMap.getD_eq_getD_getElem?]
-  change left[t]?.getD fuel = right[t]?.getD fuel
-  rw [counter_getElem?_eq_of_toKey_eq (left := left) (right := right) h_key t]
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counter_dec_getElem?_eq_of_getElem?_eq
@@ -4716,86 +3682,6 @@ mutual
             h_eq h_tail)
 end
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counter_getElem?_ne_zero_of_one_le_getD
-  (counter : Counter ν) (t : ν) (fuel : ℕ)
-  (h : 1 ≤ counter.getD t fuel) :
-    counter[t]? ≠ some 0 := by
-  rw [Std.HashMap.getD_eq_getD_getElem?] at h
-  change 1 ≤ counter[t]?.getD fuel at h
-  intro h_zero
-  rw [h_zero] at h
-  simp at h
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterForSeen_getD_lower_bound
-  (input : Array α) (seen : List (SpanVisit ν)) (t : ν) (fuel : ℕ)
-  (h_defaults :
-    ∀ visit, visit ∈ seen → visit.1 = t →
-      fuel ≤ input.size - visit.2.1 + 1) :
-    fuel - spanVisitCount t seen ≤
-      (counterForSeen input seen).getD t fuel := by
-  induction seen with
-  | nil =>
-      simp [counterForSeen, Counter.empty]
-  | cons visit tail ih =>
-      by_cases h_tag : visit.1 = t
-      · have h_default :
-            fuel ≤ input.size - visit.2.1 + 1 :=
-          h_defaults visit (by simp) h_tag
-        have h_tail_defaults :
-            ∀ visit', visit' ∈ tail → visit'.1 = t →
-              fuel ≤ input.size - visit'.2.1 + 1 := by
-          intro visit' h_mem h_eq
-          exact h_defaults visit' (by simp [h_mem]) h_eq
-        have h_tail_lb := ih h_tail_defaults
-        have h_getD_mono :
-            (counterForSeen input tail).getD t fuel ≤
-              (counterForSeen input tail).getD t
-                (input.size - visit.2.1 + 1) :=
-          counter_getD_mono_default
-            (counter := counterForSeen input tail) (t := t) h_default
-        rw [counterForSeen_cons]
-        rw [h_tag]
-        rw [counter_dec_self_getD]
-        simp [spanVisitCount, h_tag]
-        omega
-      · have h_tail_defaults :
-            ∀ visit', visit' ∈ tail → visit'.1 = t →
-              fuel ≤ input.size - visit'.2.1 + 1 := by
-          intro visit' h_mem h_eq
-          exact h_defaults visit' (by simp [h_mem]) h_eq
-        have h_tail_lb := ih h_tail_defaults
-        rw [counterForSeen_cons]
-        have h_other := counter_dec_other_getElem?
-          (counter := counterForSeen input tail)
-          (t := visit.1) (u := t)
-          (fuel := input.size - visit.2.1 + 1) h_tag
-        rw [Std.HashMap.getD_eq_getD_getElem?]
-        change fuel - spanVisitCount t (visit :: tail) ≤
-          (((counterForSeen input tail).dec visit.1
-            (input.size - visit.2.1 + 1))[t]?).getD fuel
-        rw [h_other]
-        simp [spanVisitCount, h_tag]
-        rw [Std.HashMap.getD_eq_getD_getElem?] at h_tail_lb
-        exact Nat.le_add_of_sub_le h_tail_lb
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterForSeen_getElem?_ne_zero_of_count_lt
-  (input : Array α) (seen : List (SpanVisit ν)) (t : ν) (fuel : ℕ)
-  (h_defaults :
-    ∀ visit, visit ∈ seen → visit.1 = t →
-      fuel ≤ input.size - visit.2.1 + 1)
-  (h_count : spanVisitCount t seen < fuel) :
-    (counterForSeen input seen)[t]? ≠ some 0 := by
-  have h_lower :=
-    counterForSeen_getD_lower_bound
-      (input := input) (seen := seen) (t := t) (fuel := fuel)
-      h_defaults
-  have h_one : 1 ≤ (counterForSeen input seen).getD t fuel := by
-    omega
-  exact counter_getElem?_ne_zero_of_one_le_getD
-    (counter := counterForSeen input seen) (t := t) (fuel := fuel) h_one
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 abbrev CounterMatchesSeen
@@ -4807,15 +3693,6 @@ theorem counterMatchesSeen_nil (input : Array α) :
     CounterMatchesSeen (ν := ν) input [] (Counter.empty : Counter ν) := by
   rfl
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterMatchesSeen_cons
-  (input : Array α) (visit : SpanVisit ν) (seen : List (SpanVisit ν))
-  {counter : Counter ν}
-  (h_counter : CounterMatchesSeen input seen counter) :
-    CounterMatchesSeen input (visit :: seen)
-      (counter.dec visit.1 (input.size - visit.2.1 + 1)) := by
-  subst counter
-  rfl
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counterMatchesSeen_cons_nodeSpan
@@ -4829,30 +3706,6 @@ theorem counterMatchesSeen_cons_nodeSpan
   subst counter
   rfl
 
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterMatchesSeen_getElem?_ne_zero
-  (input : Array α) (seen : List (SpanVisit ν)) {counter : Counter ν}
-  (h_counter : CounterMatchesSeen input seen counter)
-  {t : ν}
-  (h_nonzero : (counterForSeen input seen)[t]? ≠ some 0) :
-    counter[t]? ≠ some 0 := by
-  subst counter
-  exact h_nonzero
-
-omit [BEq α] [DecidableEq α] [Fintype ν] in
-theorem counterMatchesSeen_getElem?_ne_zero_of_count_lt
-  (input : Array α) (seen : List (SpanVisit ν)) {counter : Counter ν}
-  (h_counter : CounterMatchesSeen input seen counter)
-  (t : ν) (fuel : ℕ)
-  (h_defaults :
-    ∀ visit, visit ∈ seen → visit.1 = t →
-      fuel ≤ input.size - visit.2.1 + 1)
-  (h_count : spanVisitCount t seen < fuel) :
-    counter[t]? ≠ some 0 := by
-  subst counter
-  exact counterForSeen_getElem?_ne_zero_of_count_lt
-    (input := input) (seen := seen) (t := t) (fuel := fuel)
-    h_defaults h_count
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
 theorem counterMatchesSeen_getElem?_ne_zero_of_initialFuel_none
@@ -4888,22 +3741,6 @@ lemma array_getElem?_of_toList_eq_append_singleton
     simp
   simpa using h_list
 
-omit [Fintype ν] in
-lemma terminal'_complete
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α} {start : ℕ}
-  (h : input[start]? = some a)
-  : Leaf (cfg := cfg) a ∈
-      (runParser (tag := tag cfg) (Leaf <$> terminal' (tag := tag cfg) a) input start).1.getD (start + 1) [] := by
-  have h_terminal : a ∈
-      (runParser (tag := tag cfg) (terminal' (tag := tag cfg) (μ := List) a) input start).1.getD (start + 1) [] := by
-    exact (mem_runParser_terminal_iff (tag := tag cfg)
-      (a := a) (x := a) (input := input) (start := start) (end_pos := start + 1)).mpr
-      ⟨h.symm, rfl, rfl⟩
-  exact mem_runParser_map_of_mem
-    (tag := tag cfg) (β := α)
-    (terminal' (tag := tag cfg) (μ := List) a)
-    Leaf input start (start + 1) a h_terminal
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 abbrev validChildPair {cfg : @CFG α ν} :
@@ -4930,35 +3767,6 @@ lemma valid_node_of_validChildPairs
     cases sym <;> cases subtree <;>
       simp [validChildPair] at h_pair ⊢ <;> assumption
 
-omit [Fintype ν] in
-theorem lower_rule_branch_sound_of_traverse_pairs
-  {cfg : @CFG α ν}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
-  {mkParser : Symbol α ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
-  {input : Array α}
-  (h_children :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start end_ : ℕ,
-      start ≤ end_ ∧ end_ ≤ input.size →
-      ∀ subtrees,
-        subtrees ∈
-          (((List.traverse id (rule.val.map mkParser)).lower start)
-            memo input).1.getD end_ [] →
-        rule.val.length = subtrees.length ∧
-          ∀ pair, pair ∈ List.zip rule.val subtrees →
-            validChildPair (cfg := cfg) pair) :
-    lower_sound cfg n
-      (Node n rule <$> List.traverse id (rule.val.map mkParser)) input := by
-  apply lower_map_sound_of_forall
-  intro memo h_memo start end_ h_bound subtrees h_subtrees
-  obtain ⟨h_len, h_pairs⟩ :=
-    h_children memo h_memo start end_ h_bound subtrees h_subtrees
-  constructor
-  · exact valid_node_of_validChildPairs
-      (cfg := cfg) (n := n) (rule := rule)
-      (children := subtrees) h_len h_pairs
-  · simp [ParseTree.root]
 
 omit [Fintype ν] in
 theorem lower_rule_branch_result_sound_of_traverse_pairs
@@ -5143,38 +3951,6 @@ theorem lower_memo_wellFormed_traverse_cons_failure
         simpa [Parser.failure, ReaderT.pure, Pure.pure] using h_memo)
       h_tail
 
-set_option linter.unusedSectionVars false in
-theorem lower_memo_wellFormed_traverse_cons_memoize
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (n : ν)
-  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
-  {input : Array α}
-  (h_step :
-    ∀ start,
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        memo_wellFormed cfg input
-          (((memoizeStep counter g n
-            (fun fuel => memoize (counter.dec n fuel) g) start)
-            memo input).2.val))
-  (h_tail :
-    lower_memo_wellFormed cfg (List.traverse id tail) input) :
-    lower_memo_wellFormed cfg
-      (List.traverse id ((memoize counter g n) :: tail)) input := by
-  by_cases h_counter : counter[n]? = some 0
-  · simpa [memoize, h_counter] using
-      lower_memo_wellFormed_traverse_cons_failure
-        (cfg := cfg) (tail := tail) (input := input) h_tail
-  · simpa [memoize, h_counter] using
-      lower_memo_wellFormed_traverse_cons_lift
-        (cfg := cfg)
-        (p := memoizeStep counter g n
-          (fun fuel => memoize (counter.dec n fuel) g))
-        (tail := tail) (input := input)
-        h_step h_tail
 
 omit [Fintype ν] in
 theorem lower_memo_complete_traverse_cons_terminal
@@ -5602,14 +4378,6 @@ theorem treeSubtree_trans
   | child h_child ih =>
       exact TreeSubtree.child ih
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-theorem treeSubtree_of_properTreeSubtree
-  {cfg : @CFG α ν} {target tree : ParseTree cfg}
-  (h_subtree : ProperTreeSubtree (cfg := cfg) target tree) :
-    TreeSubtree (cfg := cfg) target tree := by
-  cases h_subtree with
-  | child h_child =>
-      exact TreeSubtree.child h_child
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 theorem properTreeSubtree_of_treeSubtree_of_proper
@@ -5747,15 +4515,6 @@ theorem subtreeSpan_treeSubtree
   | child h_child ih =>
       exact TreeSubtree.child ih
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma direct_child_leaves_length_le_parent
-  {cfg : @CFG α ν}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
-  {before after : List (ParseTree cfg)} {child : ParseTree cfg} :
-    child.leaves.length ≤
-      (Node (cfg := cfg) n rule (before ++ child :: after)).leaves.length := by
-  simp [leaves_node_eq_forestLeaves, forestLeaves, List.length_append]
-  omega
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma direct_child_span_bounds
@@ -5818,55 +4577,6 @@ theorem subtreeSpan_input
           using h_input
       exact ih h_child_input
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma direct_same_tag_child_leaves_length_lt_parent_of_span_ne
-  {cfg : @CFG α ν}
-  {n : ν}
-  {parentRule : {rule // rule ∈ cfg.rules n}}
-  {childRule : {rule // rule ∈ cfg.rules n}}
-  {before after childChildren : List (ParseTree cfg)}
-  {parentPre : List α}
-  (h_span_ne :
-    nodeSpanVisit n parentPre.length
-        (Node (cfg := cfg) n parentRule
-          (before ++ Node (cfg := cfg) n childRule childChildren :: after)) ≠
-      nodeSpanVisit n
-        (parentPre ++ forestLeaves (cfg := cfg) before).length
-        (Node (cfg := cfg) n childRule childChildren)) :
-    (Node (cfg := cfg) n childRule childChildren).leaves.length <
-      (Node (cfg := cfg) n parentRule
-        (before ++ Node (cfg := cfg) n childRule childChildren :: after)).leaves.length := by
-  have h_le :
-      (Node (cfg := cfg) n childRule childChildren).leaves.length ≤
-        (Node (cfg := cfg) n parentRule
-          (before ++ Node (cfg := cfg) n childRule childChildren :: after)).leaves.length :=
-    direct_child_leaves_length_le_parent
-      (cfg := cfg) (n := n) (rule := parentRule)
-      (before := before) (after := after)
-      (child := Node (cfg := cfg) n childRule childChildren)
-  by_contra h_not_lt
-  have h_len_eq :
-      (Node (cfg := cfg) n childRule childChildren).leaves.length =
-        (Node (cfg := cfg) n parentRule
-          (before ++ Node (cfg := cfg) n childRule childChildren :: after)).leaves.length := by
-    omega
-  have h_parent_len :
-      (Node (cfg := cfg) n parentRule
-        (before ++ Node (cfg := cfg) n childRule childChildren :: after)).leaves.length =
-        (forestLeaves (cfg := cfg) before).length +
-          (Node (cfg := cfg) n childRule childChildren).leaves.length +
-          (forestLeaves (cfg := cfg) after).length := by
-    simp [leaves_node_eq_forestLeaves, forestLeaves, List.length_append,
-      Nat.add_assoc]
-  have h_before_zero :
-      (forestLeaves (cfg := cfg) before).length = 0 := by
-    omega
-  have h_after_zero :
-      (forestLeaves (cfg := cfg) after).length = 0 := by
-    omega
-  apply h_span_ne
-  simp [nodeSpanVisit, h_before_zero, h_after_zero,
-    leaves_node_eq_forestLeaves, forestLeaves]
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [DecidableEq α]
   [DecidableEq ν] [Hashable ν] [Fintype ν] in
@@ -6027,169 +4737,6 @@ lemma lower_rule_branch_complete
     (start := start) (end_pos := end_)
     (x := subtrees) h_children
 
-omit [Fintype ν] in
-lemma lower_terminal'_sound
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α} {start end_ : ℕ}
-  {memo : MemoData (tag cfg) List} {tree : ParseTree cfg}
-  (h : tree ∈ (((Leaf <$> terminal' (tag := tag cfg) a).lower start)
-      memo input).1.getD end_ []) :
-    tree = Leaf a := by
-  obtain ⟨x, h_x, h_tree⟩ := mem_lower_map_exists_of_mem
-    (tag := tag cfg) (β := α)
-    (p := terminal' (tag := tag cfg) (μ := List) a)
-    (f := Leaf (cfg := cfg))
-    (memo := memo) (input := input)
-    (start := start) (end_pos := end_) (y := tree) h
-  have h_x' := (mem_lower_terminal_iff
-    (tag := tag cfg) (a := a) (x := x)
-    (input := input) (start := start) (end_pos := end_)
-    (memo := memo)).mp h_x
-  exact h_tree.symm.trans (congrArg Leaf h_x'.2.2)
-
-omit [Fintype ν] in
-lemma lower_terminal'_bounded
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α} {start end_ : ℕ}
-  {memo : MemoData (tag cfg) List} {tree : ParseTree cfg}
-  (_h_start : start ≤ input.size)
-  (h : tree ∈ (((Leaf <$> terminal' (tag := tag cfg) a).lower start)
-      memo input).1.getD end_ []) :
-    start ≤ end_ ∧ end_ ≤ input.size := by
-  obtain ⟨x, h_x, _h_tree⟩ := mem_lower_map_exists_of_mem
-    (tag := tag cfg) (β := α)
-    (p := terminal' (tag := tag cfg) (μ := List) a)
-    (f := Leaf (cfg := cfg))
-    (memo := memo) (input := input)
-    (start := start) (end_pos := end_) (y := tree) h
-  have h_x' := (mem_lower_terminal_iff
-    (tag := tag cfg) (a := a) (x := x)
-    (input := input) (start := start) (end_pos := end_)
-    (memo := memo)).mp h_x
-  obtain ⟨h_match, h_end, _h_x_eq⟩ := h_x'
-  have h_start_lt : start < input.size := by
-    exact (Array.getElem?_eq_some_iff.mp h_match.symm).1
-  constructor
-  · omega
-  · omega
-
-omit [Fintype ν] in
-lemma lower_terminal'_result_bounded
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α} :
-    lower_result_bounded cfg (Leaf <$> terminal' (tag := tag cfg) a) input := by
-  intro memo _h_memo start end_ h_start tree h_mem
-  exact lower_terminal'_bounded
-    (cfg := cfg) (a := a) (input := input)
-    (start := start) (end_ := end_)
-    (memo := memo) (tree := tree)
-    h_start h_mem
-
-omit [Fintype ν] in
-lemma lower_terminal'_memo_wellFormed
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α} :
-    lower_memo_wellFormed cfg
-      (Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) input := by
-  apply lower_map_memo_wellFormed
-    (cfg := cfg)
-    (p := terminal' (tag := tag cfg) (μ := List) a)
-    (f := Leaf (cfg := cfg))
-  intro memo h_memo start
-  have h_state :
-      (((terminal' (tag := tag cfg) (μ := List) a).lower start)
-        memo input).2.val = memo := by
-    rw [terminal'_eq_lift_terminalPrimitive (tag := tag cfg) (a := a)]
-    rw [lower_lift_snd_val_eq
-      (tag := tag cfg) (β := α)
-      (p := terminalPrimitive (tag := tag cfg) a)
-      (memo := memo) (input := input) (start := start)]
-    exact terminalPrimitive_snd_val_eq
-      (tag := tag cfg) (a := a)
-      (input := input) (start := start) (memo := memo)
-  rw [h_state]
-  exact h_memo
-
-omit [Fintype ν] in
-lemma mem_lower_traverse_cons_terminal_exists_tail
-  {cfg : @CFG α ν}
-  {a : α}
-  {tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg))}
-  {memo : MemoData (tag cfg) List} {input : Array α}
-  {start end_ : ℕ} {result_head : ParseTree cfg}
-  {result_tail : List (ParseTree cfg)}
-  (h :
-      result_head :: result_tail ∈
-        (((List.traverse id
-          ((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) :: tail)).lower start)
-          memo input).1.getD end_ []) :
-      result_head = Leaf (cfg := cfg) a ∧
-        result_head ∈
-          (((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a).lower start)
-            memo input).1.getD (start + 1) [] ∧
-        start + 1 ≤ input.size ∧
-        ∃ memo_tail,
-          result_tail ∈
-            (((List.traverse id tail).lower (start + 1))
-              memo_tail input).1.getD end_ [] := by
-  have h_bind :
-      result_head :: result_tail ∈
-        (((List.traverse id
-          ((ParserM.Bind
-            (terminalPrimitive (tag := tag cfg) a)
-            (fun x =>
-              ParserM.Return (tag := tag cfg) (β := α) (μ := List)
-                (Leaf (cfg := cfg) x)) :
-              ParserM (tag := tag cfg) α List (ParseTree cfg)) :: tail)).lower start)
-          memo input).1.getD end_ [] := by
-    simpa [terminal'_eq_lift_terminalPrimitive (tag := tag cfg) (a := a)]
-      using h
-  obtain ⟨split, x, memo_tail, h_x, h_leaf_eq, h_tail⟩ :=
-    mem_lower_traverse_cons_bind_return_exists_head_tail
-      (tag := tag cfg) (β := α)
-      (p := terminalPrimitive (tag := tag cfg) a)
-      (f := Leaf (cfg := cfg))
-      (tail := tail)
-      (memo := memo) (input := input)
-      (start := start) (end_pos := end_)
-      h_bind
-  have h_x' := (mem_terminalPrimitive_iff
-    (tag := tag cfg) (a := a) (x := x)
-    (input := input) (start := start) (end_pos := split)
-    (memo := memo)).mp h_x
-  obtain ⟨h_match, h_split, h_x_eq⟩ := h_x'
-  cases h_x_eq
-  cases h_split
-  have h_term :
-      a ∈
-        (((terminal' (tag := tag cfg) (μ := List) a).lower start)
-          memo input).1.getD (start + 1) [] := by
-    exact (mem_lower_terminal_iff
-      (tag := tag cfg) (a := a) (x := a)
-      (input := input) (start := start) (end_pos := start + 1)
-      (memo := memo)).mpr
-      ⟨h_match, rfl, rfl⟩
-  have h_head_mem_leaf :
-      Leaf (cfg := cfg) a ∈
-        (((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a).lower start)
-          memo input).1.getD (start + 1) [] := by
-    exact mem_lower_map_of_mem
-      (tag := tag cfg) (β := α)
-      (p := terminal' (tag := tag cfg) (μ := List) a)
-      (f := Leaf (cfg := cfg))
-      (memo := memo) (input := input)
-      (start := start) (end_pos := start + 1)
-      (x := a) h_term
-  have h_head_mem :
-      result_head ∈
-        (((Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a).lower start)
-          memo input).1.getD (start + 1) [] := by
-    simpa [h_leaf_eq] using h_head_mem_leaf
-  have h_start_succ : start + 1 ≤ input.size := by
-    have h_lt : start < input.size :=
-      (Array.getElem?_eq_some_iff.mp h_match.symm).1
-    omega
-  exact ⟨h_leaf_eq.symm, h_head_mem, h_start_succ, memo_tail, h_tail⟩
 
 omit [Fintype ν] in
 lemma mem_lower_traverse_cons_terminal_exists_tail_wf
@@ -6381,23 +4928,6 @@ lemma terminalPrimitive_toList_eq_singleton_of_match
   simp [h_term.symm, ReaderT.pure, Pure.pure]
   exact hashMap_singleton_toList_eq_singleton (start + 1) [a]
 
-omit [Fintype ν] in
-lemma memoState_pure_snd_val_eq
-  {cfg : @CFG α ν} {δ : Type u}
-  (x : δ) (memo : MemoData (tag cfg) List) (input : Array α) :
-    ((pure x :
-        MStateT (MemoData (tag cfg) List) (ReaderM (Array α)) δ)
-      memo input).2.val = memo := by
-  rfl
-
-omit [Fintype ν] in
-lemma memoState_pure_snd_eq
-  {cfg : @CFG α ν} {δ : Type u}
-  (x : δ) (memo : MemoData (tag cfg) List) (input : Array α) :
-    (↑((pure x :
-        MStateT (MemoData (tag cfg) List) (ReaderM (Array α)) δ)
-      memo input).2 : MemoData (tag cfg) List) = memo := by
-  rfl
 
 omit [Fintype ν] in
 lemma terminalPrimitive_snd_eq
@@ -6410,19 +4940,6 @@ lemma terminalPrimitive_snd_eq
     (tag := tag cfg) (a := a)
     (input := input) (start := start) (memo := memo)
 
-omit [Fintype ν] in
-lemma empty_joinUnderCache_prefix_snd_eq
-  {cfg : @CFG α ν} {δ : Type u} [DecidableEq δ]
-  (memo : MemoData (tag cfg) List) (input : Array α) :
-    (↑((Traversable.foldl joinUnderCache
-      (pure (Std.HashMap.emptyWithCapacity : ResultMap List δ) :
-        MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
-          (ResultMap List δ))
-      ([] : List
-        (MStateT (MemoData (tag cfg) List) (ReaderM (Array α))
-          (ResultMap List δ))))
-      memo input).2 : MemoData (tag cfg) List) = memo := by
-  simp [traversable_foldl_nil, Pure.pure, ReaderT.pure]
 
 omit [Fintype ν] in
 lemma lower_return_bind_cons_complete
@@ -6447,23 +4964,6 @@ lemma lower_return_bind_cons_complete
     (start := start) (end_pos := end_)
     (x := xs) h_tail
 
-omit [Fintype ν] in
-lemma lower_traverse_complete_cons_return
-  {cfg : @CFG α ν} {γ : Type u} [DecidableEq γ]
-  {tail : List (ParserM (tag := tag cfg) α List γ)}
-  {memo : MemoData (tag cfg) List} {input : Array α}
-  {start end_ : ℕ} {x : γ} {xs : List γ}
-  (h_tail :
-    xs ∈ (((List.traverse id tail).lower start) memo input).1.getD end_ []) :
-    x :: xs ∈
-      (((List.traverse id
-        ((ParserM.Return (tag := tag cfg) (β := α) (μ := List) x) :: tail)).lower start)
-        memo input).1.getD end_ [] := by
-  rw [List.traverse, seq_eq_bind]
-  simp
-  exact lower_return_bind_cons_complete
-    (cfg := cfg) (tail := tail) (memo := memo) (input := input)
-    (start := start) (end_ := end_) (x := x) (xs := xs) h_tail
 
 omit [Fintype ν] in
 theorem lower_return_bind_cons_memo_complete
@@ -6962,30 +5462,6 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                     forestLeaves, ParseTree.leaves, List.length_append,
                     Nat.add_assoc] using h_cons
 
--- set_option maxHeartbeats 800000 in
-omit [Fintype ν] in
-lemma terminal'_sound
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α} {start end_ : ℕ} {tree : ParseTree cfg}
-  (h : tree ∈ (runParser (Leaf <$> terminal' (tag := tag cfg) a) input start).1.getD end_ [])
-  : tree = Leaf a := by
-  obtain ⟨x, h_x, h_tree⟩ := mem_runParser_map_exists_of_mem
-    (tag := tag cfg) (β := α)
-    (p := terminal' (tag := tag cfg) (μ := List) a)
-    (f := Leaf (cfg := cfg))
-    (input := input) (start := start) (end_pos := end_) (y := tree) h
-  have h_x' := (mem_runParser_terminal_iff (tag := tag cfg)
-    (a := a) (x := x) (input := input) (start := start) (end_pos := end_)).mp h_x
-  exact h_tree.symm.trans (congrArg Leaf h_x'.2.2)
-
-omit [Fintype ν] in
-lemma terminal'_bounded
-  {cfg : @CFG α ν}
-  {a : α} {input : Array α}
-  : result_bounded cfg (Leaf <$> terminal' (tag := tag cfg) a) input := by
-  exact result_bounded_of_lower_result_bounded
-    (lower_terminal'_result_bounded
-      (cfg := cfg) (a := a) (input := input))
 
 omit [Fintype ν] in
 lemma lower_failure_empty
@@ -7029,66 +5505,6 @@ lemma not_mem_lower_traverse_cons_failure
       (start := start) (end_pos := end_) h_lift
   simp [Parser.failure, ReaderT.pure, Pure.pure] at h_head
 
-set_option linter.unusedSectionVars false in
-theorem mem_lower_traverse_cons_memoize_exists_head_tail
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (n : ν)
-  (tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
-  (memo : MemoData (tag cfg) List) (input : Array α)
-  (start end_ : ℕ)
-  {result_head : ParseTree cfg} {result_tail : List (ParseTree cfg)}
-  (h :
-    result_head :: result_tail ∈
-      (((List.traverse id ((memoize counter g n) :: tail)).lower start)
-        memo input).1.getD end_ []) :
-    ∃ split memo_tail,
-      result_head ∈ (((memoize counter g n).lower start) memo input).1.getD split [] ∧
-      result_tail ∈
-        (((List.traverse id tail).lower split) memo_tail input).1.getD end_ [] := by
-  by_cases h_counter : counter[n]? = some 0
-  · have h_fail :
-      result_head :: result_tail ∈
-        (((List.traverse id
-          ((⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)) :: tail)).lower start)
-          memo input).1.getD end_ [] := by
-        simpa [memoize, h_counter] using h
-    exact False.elim (not_mem_lower_traverse_cons_failure (cfg := cfg) h_fail)
-  · have h_lift :
-      result_head :: result_tail ∈
-        (((List.traverse id
-          ((ParserM.lift
-            (memoizeStep counter g n
-              (fun fuel => memoize (counter.dec n fuel) g)) :
-              ParserM (tag := tag cfg) α List (ParseTree cfg)) :: tail)).lower start)
-          memo input).1.getD end_ [] := by
-        simpa [memoize, h_counter] using h
-    obtain ⟨split, memo_tail, h_head_step, h_tail⟩ :=
-      mem_lower_traverse_cons_lift_exists_head_tail
-        (tag := tag cfg) (β := α)
-        (p := memoizeStep counter g n
-          (fun fuel => memoize (counter.dec n fuel) g))
-        (tail := tail)
-        (memo := memo) (input := input)
-        (start := start) (end_pos := end_)
-        h_lift
-    refine ⟨split, memo_tail, ?_, h_tail⟩
-    have h_head_lift :
-        result_head ∈
-          (((ParserM.lift
-            (memoizeStep counter g n
-              (fun fuel => memoize (counter.dec n fuel) g))).lower start)
-            memo input).1.getD split [] := by
-        exact mem_lower_lift_of_mem
-          (tag := tag cfg) (β := α)
-          (p := memoizeStep counter g n
-            (fun fuel => memoize (counter.dec n fuel) g))
-          (memo := memo) (input := input)
-          (start := start) (end_pos := split)
-          (x := result_head) h_head_step
-    simpa [memoize, h_counter] using h_head_lift
 
 set_option linter.unusedSectionVars false in
 theorem mem_lower_traverse_cons_memoize_exists_head_tail_wf
@@ -7228,13 +5644,6 @@ theorem mem_lower_traverse_cons_memoize_exists_head_tail_wf
       simpa [memoize, h_counter, step] using h_result_head_lift
     · simpa [memoPrefix] using h_tail
 
-omit [Fintype ν] in
-theorem lower_failure_sound
-  (cfg : @CFG α ν) (n : ν) (input : Array α) :
-    lower_sound cfg n ⊥ input := by
-  unfold lower_sound
-  intro memo _h_memo start end_ _h_bound tree
-  simp [Std.HashMap.getD_of_isEmpty, lower_failure_empty cfg]
 
 omit [Fintype ν] in
 theorem lower_failure_result_sound
@@ -7306,24 +5715,6 @@ theorem lower_gen'_memo_complete_of_rules
         exact h_rules rule)
   simpa [gen', generatedRuleParser, generatedSymbolParser] using h_fold
 
-omit [Fintype ν] in
-lemma failure_empty (cfg : @CFG α ν) {start : ℕ} : (runParser (tag := tag cfg) (⊥ : ParserM α μ (ParseTree cfg)) input start).1.isEmpty := by
-  simp [Bot.bot, runParser, ReaderT.run, MStateT.run, ParserM.lift, ParserM.lower]
-  unfold Parser.failure Parser.bind Parser.bindRun Parser.bindContinue Parser.bindActions
-  simp [ReaderT.pure, Pure.pure, instMonadMStateT,
-    Bifunctor.snd, Functor.map, hashMap_emptyWithCapacity_toList_eq_nil]
-  change (Std.HashMap.emptyWithCapacity : Std.HashMap ℕ (μ (ParseTree cfg))).isEmpty = true
-  simp
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem failure_sound (cfg : @CFG α ν) (n : ν) (input : Array α) : sound cfg n ⊥ input
-  :=
-  sound_of_lower_sound (lower_failure_sound cfg n input)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem failure_bounded (cfg : @CFG α ν) (input : Array α) : result_bounded cfg ⊥ input
-  :=
-  result_bounded_of_lower_result_bounded (lower_failure_bounded cfg input)
 
 set_option linter.unusedSectionVars false in
 theorem lower_result_sound_memoize
@@ -7449,194 +5840,24 @@ theorem lower_memo_complete_memoize
         (next := fun fuel => memoize (counter.dec n fuel) g)
         (n := n) h_compute
 
-set_option linter.unusedSectionVars false in
-theorem lower_result_bounded_generated_traverse_memoize_guarded
-  {cfg : @CFG α ν}
-  (counter : Counter ν)
-  (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
-      (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (rule : List (Symbol α ν)) (input : Array α)
-  (h_body :
-    ∀ n,
-      counter[n]? ≠ some 0 →
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          memo_wellFormed cfg input
-              ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                  n).lower start)
-                memo input).2.val) ∧
-            resultMap_sound cfg n
-              ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                  n).lower start)
-                memo input).1) ∧
-            resultMap_bounded cfg input start
-              ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                  n).lower start)
-                memo input).1)) :
-    ∀ memo : MemoData (tag cfg) List,
-      memo_wellFormed cfg input memo →
-      ∀ start end_ : ℕ,
-      start ≤ input.size →
-      ∀ result,
-        result ∈
-          (((List.traverse id
-            (rule.map (generatedListSymbolParser cfg counter g))).lower start)
-            memo input).1.getD end_ [] →
-        start ≤ end_ ∧ end_ ≤ input.size := by
-  have h_step_memo :
-      ∀ n,
-        counter[n]? ≠ some 0 →
-        ∀ start,
-        ∀ memo : MemoData (tag cfg) List,
-          memo_wellFormed cfg input memo →
-          memo_wellFormed cfg input
-            (((memoizeStep counter g n
-              (fun fuel => memoize (counter.dec n fuel) g) start)
-              memo input).2.val) := by
-    intro n h_counter
-    exact memo_wellFormed_memoizeStep_of_guarded_body
-      (cfg := cfg) (input := input)
-      (counter := counter) (g := g) (n := n)
-      (fun memo h_memo start h_no_cache =>
-        h_body n h_counter memo h_memo start h_no_cache)
-  induction rule with
-  | nil =>
-      intro memo _h_memo start end_ h_start result h_mem
-      have h_return := (mem_lower_return_iff
-        (tag := tag cfg) (β := α)
-        (a := ([] : List (ParseTree cfg))) (x := result)
-        (memo := memo) (input := input)
-        (start := start) (end_pos := end_)).mp (by
-          simpa [List.traverse] using h_mem)
-      cases h_return.1
-      exact ⟨le_rfl, h_start⟩
-  | cons sym rest ih =>
-      cases sym with
-      | term a =>
-          intro memo h_memo start end_ h_start result h_mem
-          cases result with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              have h_tail_memo :
-                  lower_memo_wellFormed cfg
-                    (List.traverse id
-                      (rest.map (generatedListSymbolParser cfg counter g)))
-                    input :=
-                lower_memo_wellFormed_generated_traverse_memoize_guarded
-                  (cfg := cfg) counter g rest input h_step_memo
-              obtain ⟨_h_head_eq, _h_head_mem, h_start_succ,
-                memo_tail, h_memo_tail, h_tail_mem⟩ :=
-                mem_lower_traverse_cons_terminal_exists_tail_wf
-                  (cfg := cfg) (a := a)
-                  (tail := rest.map (generatedListSymbolParser cfg counter g))
-                  (memo := memo) (input := input)
-                  (start := start) (end_ := end_)
-                  (result_head := result_head) (result_tail := result_tail)
-                  h_tail_memo h_memo
-                  (by simpa [generatedListSymbolParser] using h_mem)
-              have h_tail_bounds :=
-                ih memo_tail h_memo_tail (start + 1) end_
-                  h_start_succ result_tail h_tail_mem
-              exact ⟨Nat.le_trans (Nat.le_succ start) h_tail_bounds.1,
-                h_tail_bounds.2⟩
-      | nonterm n =>
-          intro memo h_memo start end_ h_start result h_mem
-          cases result with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (memoize counter g n) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              by_cases h_counter : counter[n]? = some 0
-              · have h_fail :
-                    result_head :: result_tail ∈
-                      (((List.traverse id
-                        ((⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)) ::
-                          rest.map (generatedListSymbolParser cfg counter g))).lower start)
-                        memo input).1.getD end_ [] := by
-                  simpa [generatedListSymbolParser, memoize, h_counter] using h_mem
-                exact False.elim (not_mem_lower_traverse_cons_failure
-                  (cfg := cfg) h_fail)
-              · have h_tail_memo :
-                    lower_memo_wellFormed cfg
-                      (List.traverse id
-                        (rest.map (generatedListSymbolParser cfg counter g)))
-                      input :=
-                  lower_memo_wellFormed_generated_traverse_memoize_guarded
-                    (cfg := cfg) counter g rest input h_step_memo
-                obtain ⟨split, memo_tail, h_memo_tail,
-                  h_head_mem, h_tail_mem⟩ :=
-                  mem_lower_traverse_cons_memoize_exists_head_tail_wf
-                    (cfg := cfg) counter g n
-                    (tail := rest.map (generatedListSymbolParser cfg counter g))
-                    (memo := memo) (input := input)
-                    (start := start) (end_ := end_)
-                    (result_head := result_head) (result_tail := result_tail)
-                    (h_step_memo n h_counter)
-                    h_tail_memo h_memo
-                    (by simpa [generatedListSymbolParser] using h_mem)
-                have h_head_bounds :=
-                  (lower_result_bounded_memoize
-                    (cfg := cfg) (input := input)
-                    counter g
-                    (n := n)
-                    (by
-                      intro memo h_memo start h_no_cache
-                      exact (h_body n h_counter memo h_memo start h_no_cache).2.2))
-                    memo h_memo start split h_start result_head h_head_mem
-                have h_tail_bounds :=
-                  ih memo_tail h_memo_tail split end_ h_head_bounds.2
-                    result_tail h_tail_mem
-                exact ⟨Nat.le_trans h_head_bounds.1 h_tail_bounds.1,
-                  h_tail_bounds.2⟩
+private structure GeneratedTraverseSafety
+    {cfg : @CFG α ν} (input : Array α) (rule : List (Symbol α ν))
+    (start end_ : ℕ) (subtrees : List (ParseTree cfg)) : Prop where
+  length_eq : rule.length = subtrees.length
+  valid_pairs :
+    ∀ pair, pair ∈ List.zip rule subtrees →
+      validChildPair (cfg := cfg) pair
+  bounds :
+    start ≤ input.size → start ≤ end_ ∧ end_ ≤ input.size
 
 set_option linter.unusedSectionVars false in
-theorem lower_valid_pairs_generated_traverse_memoize_guarded
+private theorem lower_generated_traverse_safety_memoize_guarded
   {cfg : @CFG α ν}
   (counter : Counter ν)
   (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
       (t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg))
   (rule : List (Symbol α ν)) (input : Array α)
-  (h_body :
-    ∀ n,
-      counter[n]? ≠ some 0 →
-      ∀ memo : MemoData (tag cfg) List,
-        memo_wellFormed cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          memo_wellFormed cfg input
-              ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                  n).lower start)
-                memo input).2.val) ∧
-            resultMap_sound cfg n
-              ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                  n).lower start)
-                memo input).1) ∧
-            resultMap_bounded cfg input start
-              ((((g (memoize (counter.dec n (input.size - start + 1)) g)
-                  n).lower start)
-                memo input).1)) :
+  (h_body : GeneratedBodySafety cfg input counter g) :
     ∀ memo : MemoData (tag cfg) List,
       memo_wellFormed cfg input memo →
       ∀ start end_ : ℕ,
@@ -7645,9 +5866,7 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
           (((List.traverse id
             (rule.map (generatedListSymbolParser cfg counter g))).lower start)
             memo input).1.getD end_ [] →
-        rule.length = subtrees.length ∧
-          ∀ pair, pair ∈ List.zip rule subtrees →
-            validChildPair (cfg := cfg) pair := by
+        GeneratedTraverseSafety input rule start end_ subtrees := by
   have h_step_memo :
       ∀ n,
         counter[n]? ≠ some 0 →
@@ -7674,35 +5893,35 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
         (start := start) (end_pos := end_)).mp (by
           simpa [List.traverse] using h_mem)
       cases h_return.2
-      constructor
-      · simp
+      refine ⟨by simp, ?_, ?_⟩
       · intro pair h_pair
         simp at h_pair
+      · intro h_start
+        cases h_return.1
+        exact ⟨le_rfl, h_start⟩
   | cons sym rest ih =>
-      cases sym with
-      | term a =>
-          intro memo h_memo start end_ subtrees h_mem
-          cases subtrees with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (Leaf (cfg := cfg) <$> terminal' (tag := tag cfg) a) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
-              have h_tail_memo :
-                  lower_memo_wellFormed cfg
-                    (List.traverse id
-                      (rest.map (generatedListSymbolParser cfg counter g)))
-                    input :=
-                lower_memo_wellFormed_generated_traverse_memoize_guarded
-                  (cfg := cfg) counter g rest input h_step_memo
-              obtain ⟨h_head_eq, _h_head_mem, _h_start_succ,
+      intro memo h_memo start end_ subtrees h_mem
+      cases subtrees with
+      | nil =>
+          have h_len := mem_lower_traverse_preserves_length
+            (tag := tag cfg) (β := α)
+            (xs := (sym :: rest).map
+              (generatedListSymbolParser cfg counter g))
+            (memo := memo) (input := input)
+            (start := start) (end_pos := end_)
+            (result := ([] : List (ParseTree cfg))) h_mem
+          simp at h_len
+      | cons result_head result_tail =>
+          have h_tail_memo :
+              lower_memo_wellFormed cfg
+                (List.traverse id
+                  (rest.map (generatedListSymbolParser cfg counter g)))
+                input :=
+            lower_memo_wellFormed_generated_traverse_memoize_guarded
+              (cfg := cfg) counter g rest input h_step_memo
+          cases sym with
+          | term a =>
+              obtain ⟨h_head_eq, _h_head_mem, h_start_succ,
                 memo_tail, h_memo_tail, h_tail_mem⟩ :=
                 mem_lower_traverse_cons_terminal_exists_tail_wf
                   (cfg := cfg) (a := a)
@@ -7712,11 +5931,11 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
                   (result_head := result_head) (result_tail := result_tail)
                   h_tail_memo h_memo
                   (by simpa [generatedListSymbolParser] using h_mem)
-              obtain ⟨h_tail_len, h_tail_pairs⟩ :=
+              have h_tail_safe :=
                 ih memo_tail h_memo_tail (start + 1) end_
                   result_tail h_tail_mem
-              constructor
-              · simp [h_tail_len]
+              refine ⟨?_, ?_, ?_⟩
+              · simp [h_tail_safe.length_eq]
               · intro pair h_pair
                 simp at h_pair
                 cases h_pair with
@@ -7724,22 +5943,12 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
                     cases h_head_pair
                     simp [validChildPair, h_head_eq]
                 | inr h_tail_pair =>
-                    exact h_tail_pairs pair h_tail_pair
-      | nonterm n =>
-          intro memo h_memo start end_ subtrees h_mem
-          cases subtrees with
-          | nil =>
-              have h_len := mem_lower_traverse_preserves_length
-                (tag := tag cfg) (β := α)
-                (xs :=
-                  (memoize counter g n) ::
-                    rest.map (generatedListSymbolParser cfg counter g))
-                (memo := memo) (input := input)
-                (start := start) (end_pos := end_)
-                (result := ([] : List (ParseTree cfg)))
-                (by simpa [generatedListSymbolParser] using h_mem)
-              simp at h_len
-          | cons result_head result_tail =>
+                    exact h_tail_safe.valid_pairs pair h_tail_pair
+              · intro _h_start
+                have h_tail_bounds := h_tail_safe.bounds h_start_succ
+                exact ⟨Nat.le_trans (Nat.le_succ start) h_tail_bounds.1,
+                  h_tail_bounds.2⟩
+          | nonterm n =>
               by_cases h_counter : counter[n]? = some 0
               · have h_fail :
                     result_head :: result_tail ∈
@@ -7750,14 +5959,7 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
                   simpa [generatedListSymbolParser, memoize, h_counter] using h_mem
                 exact False.elim (not_mem_lower_traverse_cons_failure
                   (cfg := cfg) h_fail)
-              · have h_tail_memo :
-                    lower_memo_wellFormed cfg
-                      (List.traverse id
-                        (rest.map (generatedListSymbolParser cfg counter g)))
-                      input :=
-                  lower_memo_wellFormed_generated_traverse_memoize_guarded
-                    (cfg := cfg) counter g rest input h_step_memo
-                obtain ⟨split, memo_tail, h_memo_tail,
+              · obtain ⟨split, memo_tail, h_memo_tail,
                   h_head_mem, h_tail_mem⟩ :=
                   mem_lower_traverse_cons_memoize_exists_head_tail_wf
                     (cfg := cfg) counter g n
@@ -7775,13 +5977,14 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
                     (n := n)
                     (by
                       intro memo h_memo start h_no_cache
-                      exact (h_body n h_counter memo h_memo start h_no_cache).2.1))
+                      exact
+                        (h_body n h_counter memo h_memo start h_no_cache).2.1))
                     memo h_memo start split result_head h_head_mem
-                obtain ⟨h_tail_len, h_tail_pairs⟩ :=
+                have h_tail_safe :=
                   ih memo_tail h_memo_tail split end_
                     result_tail h_tail_mem
-                constructor
-                · simp [h_tail_len]
+                refine ⟨?_, ?_, ?_⟩
+                · simp [h_tail_safe.length_eq]
                 · intro pair h_pair
                   simp at h_pair
                   cases h_pair with
@@ -7796,7 +5999,23 @@ theorem lower_valid_pairs_generated_traverse_memoize_guarded
                             simpa [ParseTree.root] using h_root.symm
                           exact ⟨h_eq, h_valid⟩
                   | inr h_tail_pair =>
-                      exact h_tail_pairs pair h_tail_pair
+                      exact h_tail_safe.valid_pairs pair h_tail_pair
+                · intro h_start
+                  have h_head_bounds :=
+                    (lower_result_bounded_memoize
+                      (cfg := cfg) (input := input)
+                      counter g
+                      (n := n)
+                      (by
+                        intro memo h_memo start h_no_cache
+                        exact
+                          (h_body n h_counter memo h_memo start h_no_cache).2.2))
+                      memo h_memo start split h_start result_head h_head_mem
+                  have h_tail_bounds :=
+                    h_tail_safe.bounds h_head_bounds.2
+                  exact ⟨Nat.le_trans h_head_bounds.1 h_tail_bounds.1,
+                    h_tail_bounds.2⟩
+
 
 set_option linter.unusedSectionVars false in
 theorem lower_generated_rule_branch_result_sound_bounded_memoize_guarded
@@ -7853,6 +6072,9 @@ theorem lower_generated_rule_branch_result_sound_bounded_memoize_guarded
       (counter := counter) (g := g) (n := n)
       (fun memo h_memo start h_no_cache =>
         h_body n h_counter memo h_memo start h_no_cache)
+  have h_traverse :=
+    lower_generated_traverse_safety_memoize_guarded
+      (cfg := cfg) counter g rule.val input h_body
   refine ⟨?_, ?_, ?_⟩
   · exact lower_rule_branch_result_sound_of_traverse_pairs
       (cfg := cfg) (n := n) (rule := rule)
@@ -7860,20 +6082,17 @@ theorem lower_generated_rule_branch_result_sound_bounded_memoize_guarded
       (input := input)
       (by
         intro memo h_memo start end_ subtrees h_mem
-        exact lower_valid_pairs_generated_traverse_memoize_guarded
-          (cfg := cfg) counter g rule.val input
-          h_body
-          memo h_memo start end_ subtrees h_mem)
+        have h_safe :=
+          h_traverse memo h_memo start end_ subtrees h_mem
+        exact ⟨h_safe.length_eq, h_safe.valid_pairs⟩)
   · exact lower_rule_branch_result_bounded_of_traverse
       (cfg := cfg) (n := n) (rule := rule)
       (mkParser := generatedListSymbolParser cfg counter g)
       (input := input)
       (by
         intro memo h_memo start end_ h_start subtrees h_mem
-        exact lower_result_bounded_generated_traverse_memoize_guarded
-          (cfg := cfg) counter g rule.val input
-          h_body
-          memo h_memo start end_ h_start subtrees h_mem)
+        exact
+          (h_traverse memo h_memo start end_ subtrees h_mem).bounds h_start)
   · exact lower_rule_branch_memo_wellFormed_of_traverse
       (cfg := cfg) (n := n) (rule := rule)
       (mkParser := generatedListSymbolParser cfg counter g)
@@ -7881,63 +6100,6 @@ theorem lower_generated_rule_branch_result_sound_bounded_memoize_guarded
       (lower_memo_wellFormed_generated_traverse_memoize_guarded
         (cfg := cfg) counter g rule.val input h_step_memo)
 
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-/-- State-aware soundness for parser joins.
-
-This follows `Parser.orElse` directly: the right branch is checked in the memo
-state produced by the left branch, not in `startState`.
--/
-theorem sound_of_sup_sound_after_left
-  (cfg : @CFG α ν) (n : ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  (h_p : sound cfg n p input)
-  (h_q_after :
-    ∀ start end_ : ℕ,
-      ∀ _h_bound : start ≤ end_ ∧ end_ ≤ input.size,
-      ∀ tree ∈
-        ((q.lower start)
-          (↑(((p.lower start) startState input).2)) input).1.getD end_ [],
-        tree.Valid ∧ tree.root = Symbol.nonterm n) :
-    sound cfg n (p ⊔ q) input := by
-  unfold sound at *
-  intro start end_ h_bound tree h_mem
-  have h_or :=
-    (mem_runParser_sup_iff_after_left
-      (tag := tag cfg) (β := α)
-      p q input start end_ tree).mp h_mem
-  cases h_or with
-  | inl h_left =>
-      exact h_p start end_ h_bound tree h_left
-  | inr h_right =>
-      exact h_q_after start end_ h_bound tree h_right
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-/-- State-aware lower-level soundness for parser joins.
-
-Unlike `sound_of_sup_sound`, this checks the right branch in the memo state
-produced by the left branch.
--/
-theorem lower_sound_of_sup_sound_after_left
-  (cfg : @CFG α ν) (n : ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  (h_p : lower_sound cfg n p input)
-  (h_p_memo : lower_memo_wellFormed cfg p input)
-  (h_q : lower_sound cfg n q input) :
-    lower_sound cfg n (p ⊔ q) input := by
-  unfold lower_sound at *
-  intro memo h_memo start end_ h_bound tree h_mem
-  have h_or :=
-    (mem_lower_sup_iff_after_left
-      (tag := tag cfg) (β := α)
-      p q memo input start end_ tree).mp h_mem
-  cases h_or with
-  | inl h_left =>
-      exact h_p memo h_memo start end_ h_bound tree h_left
-  | inr h_right =>
-      exact h_q
-        (↑(((p.lower start) memo input).2))
-        (h_p_memo memo h_memo start)
-        start end_ h_bound tree h_right
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 /-- State-aware lower-level direct result soundness for parser joins.
@@ -7968,36 +6130,6 @@ theorem lower_result_sound_of_sup_sound_after_left
         (h_p_memo memo h_memo start)
         start end_ tree h_right
 
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-/-- State-aware bounds preservation for parser joins.
-
-The right branch is checked in the state produced by the left branch, matching
-`Parser.orElse`.
--/
-theorem bounded_of_sup_bounded_after_left
-  (cfg : @CFG α ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg)) (input : Array α)
-  (h_p : result_bounded cfg p input)
-  (h_q_after :
-    ∀ start end_ : ℕ,
-      start ≤ input.size →
-      ∀ tree,
-        tree ∈
-          ((q.lower start)
-            (↑(((p.lower start) startState input).2)) input).1.getD end_ [] →
-        start ≤ end_ ∧ end_ ≤ input.size) :
-    result_bounded cfg (p ⊔ q) input := by
-  unfold result_bounded at *
-  intro start end_ h_start tree h_mem
-  have h_or :=
-    (mem_runParser_sup_iff_after_left
-      (tag := tag cfg) (β := α)
-      p q input start end_ tree).mp h_mem
-  cases h_or with
-  | inl h_left =>
-      exact h_p start end_ h_start tree h_left
-  | inr h_right =>
-      exact h_q_after start end_ h_start tree h_right
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 /-- State-aware lower-level bounds preservation for parser joins.
@@ -8126,34 +6258,7 @@ theorem lower_gen'_result_sound_bounded_memoize
   simpa [gen', parseSym, parseRule, generatedListSymbolParser] using h_fold
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_complete_of_sup_left
-  (cfg : @CFG α ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (memo : MemoData (tag cfg) List) (input : Array α)
-  {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem : tree ∈ ((p.lower start) memo input).1.getD end_ []) :
-    tree ∈ (((p ⊔ q).lower start) memo input).1.getD end_ [] := by
-  exact (mem_lower_sup_iff_after_left
-    (tag := tag cfg) (β := α)
-    p q memo input start end_ tree).mpr (Or.inl h_mem)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_complete_of_sup_right_after_left
-  (cfg : @CFG α ν)
-  (p q : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (memo : MemoData (tag cfg) List) (input : Array α)
-  {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem :
-    tree ∈
-      ((q.lower start)
-        (↑(((p.lower start) memo input).2)) input).1.getD end_ []) :
-    tree ∈ (((p ⊔ q).lower start) memo input).1.getD end_ [] := by
-  exact (mem_lower_sup_iff_after_left
-    (tag := tag cfg) (β := α)
-    p q memo input start end_ tree).mpr (Or.inr h_mem)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_complete_of_foldl_sup_acc
+private theorem lower_complete_of_foldl_sup_acc
   (cfg : @CFG α ν)
   (parsers : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
   (acc : ParserM (tag := tag cfg) α List (ParseTree cfg))
@@ -8169,153 +6274,87 @@ theorem lower_complete_of_foldl_sup_acc
   | cons head tail ih =>
       simp [List.foldl]
       apply ih
-      exact lower_complete_of_sup_left cfg acc head memo input h_mem
+      exact (mem_lower_sup_iff_after_left
+        (tag := tag cfg) (β := α)
+        acc head memo input start end_ tree).mpr (Or.inl h_mem)
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_complete_of_foldl_sup_head_after_left
-  (cfg : @CFG α ν)
-  (tail : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
-  (acc head : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (memo : MemoData (tag cfg) List) (input : Array α)
-  {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem :
-    tree ∈
-      ((head.lower start)
-        (↑(((acc.lower start) memo input).2)) input).1.getD end_ []) :
-    tree ∈
-      (((tail.foldl ParserM.instMaxOfTraversableOfDecidableEq.max (acc ⊔ head)).lower start)
-        memo input).1.getD end_ [] := by
-  exact lower_complete_of_foldl_sup_acc
-    (cfg := cfg) (parsers := tail) (acc := acc ⊔ head)
-    (memo := memo) (input := input)
-    (lower_complete_of_sup_right_after_left cfg acc head memo input h_mem)
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_complete_of_foldl_sup_mem_after_prefix
-  (cfg : @CFG α ν)
-  (pre suffix : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
-  (acc p : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (memo : MemoData (tag cfg) List) (input : Array α)
-  {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_mem :
-    tree ∈
-      ((p.lower start)
-        (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
-          memo input).2)) input).1.getD end_ []) :
-    tree ∈
-      ((((pre ++ p :: suffix).foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
-        memo input).1.getD end_ [] := by
-  rw [List.foldl_append]
-  simp [List.foldl]
-  exact lower_complete_of_foldl_sup_head_after_left
-    (cfg := cfg) (tail := suffix)
-    (acc := pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
-    (head := p) (memo := memo) (input := input) h_mem
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_complete_of_foldl_sup_mem_split
-  (cfg : @CFG α ν)
-  (parsers pre suffix : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
-  (acc p : ParserM (tag := tag cfg) α List (ParseTree cfg))
-  (memo : MemoData (tag cfg) List) (input : Array α)
-  {start end_ : ℕ} {tree : ParseTree cfg}
-  (h_split : parsers = pre ++ p :: suffix)
-  (h_mem :
-    tree ∈
-      ((p.lower start)
-        (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
-          memo input).2)) input).1.getD end_ []) :
-    tree ∈
-      (((parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
-        memo input).1.getD end_ [] := by
-  subst parsers
-  exact lower_complete_of_foldl_sup_mem_after_prefix
-    (cfg := cfg) (pre := pre) (suffix := suffix)
-    (acc := acc) (p := p)
-    (memo := memo) (input := input) h_mem
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem lower_gen'_rule_complete_after_split
+private theorem lower_gen'_selected_rule_complete
   (cfg : @CFG α ν)
   (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  {n : ν} {rule : List (Symbol α ν)}
-  (h_rule : rule ∈ cfg.rules n)
-  (pre suffix : List (ParserM (tag := tag cfg) α List (ParseTree cfg)))
+  {n : ν} (rule : {rule // rule ∈ cfg.rules n})
   {memo : MemoData (tag cfg) List} {input : Array α}
-  {start end_ : ℕ} {subtrees : List (ParseTree cfg)}
-  (h_split :
-    (cfg.rules n).attach.map (generatedRuleParser cfg recur n) =
-      pre ++ generatedRuleParser cfg recur n ⟨rule, h_rule⟩ :: suffix)
+  {start end_ : ℕ} {children : List (ParseTree cfg)}
+  (h_complete : memo_complete cfg input memo)
+  (h_branches :
+    ∀ rule' : {rule // rule ∈ cfg.rules n},
+      lower_memo_complete cfg
+        (generatedRuleParser cfg recur n rule') input)
   (h_children :
-    subtrees ∈
-      (((List.traverse id (rule.map (generatedSymbolParser cfg recur))).lower start)
-        (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
-          (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower start)
-          memo input).2)) input).1.getD end_ []) :
-    Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
+    ∀ selectedMemo : MemoData (tag cfg) List,
+      memo_complete cfg input selectedMemo →
+      children ∈
+        (((List.traverse id
+          (rule.val.map (generatedSymbolParser cfg recur))).lower start)
+          selectedMemo input).1.getD end_ []) :
+    Node (cfg := cfg) n rule children ∈
       (((gen' (μ := List) cfg recur n).lower start) memo input).1.getD end_ [] := by
+  let parsers :=
+    (cfg.rules n).attach.map (generatedRuleParser cfg recur n)
+  have h_selected :
+      generatedRuleParser cfg recur n rule ∈ parsers := by
+    exact List.mem_map.mpr ⟨rule, by simp, rfl⟩
+  obtain ⟨rulePrefix, suffix, h_split⟩ :=
+    List.mem_iff_append.mp h_selected
+  let prefixParser :=
+    rulePrefix.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
+      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))
+  have h_prefix_memo :
+      lower_memo_complete cfg prefixParser input := by
+    apply lower_memo_complete_of_foldl_sup
+      (cfg := cfg)
+      (parsers := rulePrefix) (acc := ⊥)
+      (lower_failure_memo_complete cfg input)
+    intro p h_p
+    have h_p_all : p ∈ parsers := by
+      rw [h_split]
+      simp [h_p]
+    rw [List.mem_map] at h_p_all
+    rcases h_p_all with ⟨rule', _h_rule_mem, rfl⟩
+    exact h_branches rule'
+  let selectedMemo : MemoData (tag cfg) List :=
+    ↑(((prefixParser.lower start) memo input).2)
+  have h_selected_complete :
+      memo_complete cfg input selectedMemo := by
+    exact h_prefix_memo memo h_complete start
   have h_branch :
-      Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees ∈
-        (((generatedRuleParser cfg recur n ⟨rule, h_rule⟩).lower start)
-          (↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
-            (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower start)
-            memo input).2)) input).1.getD end_ [] := by
+      Node (cfg := cfg) n rule children ∈
+        (((generatedRuleParser cfg recur n rule).lower start)
+          selectedMemo input).1.getD end_ [] := by
     simpa [generatedRuleParser] using
       lower_rule_branch_complete
-        (cfg := cfg) (n := n) (rule := rule) h_rule
+        (cfg := cfg) (n := n) (rule := rule.val) rule.property
         (mkParser := generatedSymbolParser cfg recur)
-        (memo :=
-          ↑((((pre.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
-            (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower start)
-            memo input).2))
-        (input := input) (start := start) (end_ := end_)
-        (subtrees := subtrees) h_children
+        (memo := selectedMemo) (input := input)
+        (start := start) (end_ := end_)
+        (subtrees := children)
+        (h_children selectedMemo h_selected_complete)
+  have h_choice :
+      Node (cfg := cfg) n rule children ∈
+        (((prefixParser ⊔ generatedRuleParser cfg recur n rule).lower start)
+          memo input).1.getD end_ [] := by
+    exact (mem_lower_sup_iff_after_left
+      (tag := tag cfg) (β := α)
+      prefixParser (generatedRuleParser cfg recur n rule)
+      memo input start end_ (Node (cfg := cfg) n rule children)).mpr
+        (Or.inr (by simpa [selectedMemo, prefixParser] using h_branch))
   have h_fold :=
-    lower_complete_of_foldl_sup_mem_split
-      (cfg := cfg)
-      (parsers := (cfg.rules n).attach.map (generatedRuleParser cfg recur n))
-      (pre := pre) (suffix := suffix)
-      (acc := (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)))
-      (p := generatedRuleParser cfg recur n ⟨rule, h_rule⟩)
-      (memo := memo) (input := input)
-      (start := start) (end_ := end_)
-      (tree := Node (cfg := cfg) n ⟨rule, h_rule⟩ subtrees)
-      h_split h_branch
-  simpa [gen', generatedRuleParser, generatedSymbolParser] using h_fold
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-theorem list_split_of_mem
-  {δ : Type u} {x : δ} {xs : List δ}
-  (h_mem : x ∈ xs) :
-    ∃ pre suffix, xs = pre ++ x :: suffix := by
-  induction xs with
-  | nil =>
-      simp at h_mem
-  | cons head tail ih =>
-      simp at h_mem
-      cases h_mem with
-      | inl h_eq =>
-          cases h_eq
-          exact ⟨[], tail, rfl⟩
-      | inr h_tail =>
-          obtain ⟨pre, suffix, h_split⟩ := ih h_tail
-          exact ⟨head :: pre, suffix, by simp [h_split]⟩
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
-theorem generatedRuleParser_split_of_rule_mem
-  (cfg : @CFG α ν)
-  (recur : ν → ParserM (tag := tag cfg) α List (ParseTree cfg))
-  {n : ν} {rule : List (Symbol α ν)}
-  (h_rule : rule ∈ cfg.rules n) :
-    ∃ pre suffix,
-      (cfg.rules n).attach.map (generatedRuleParser cfg recur n) =
-        pre ++ generatedRuleParser cfg recur n ⟨rule, h_rule⟩ :: suffix := by
-  have h_mem :
-      generatedRuleParser cfg recur n ⟨rule, h_rule⟩ ∈
-        (cfg.rules n).attach.map (generatedRuleParser cfg recur n) := by
-    exact List.mem_map.mpr ⟨⟨rule, h_rule⟩, by simp, rfl⟩
-  rcases list_split_of_mem h_mem with ⟨pre, suffix, h_split⟩
-  exact ⟨pre, suffix, h_split⟩
+    lower_complete_of_foldl_sup_acc
+      (cfg := cfg) (parsers := suffix)
+      (acc := prefixParser ⊔ generatedRuleParser cfg recur n rule)
+      (memo := memo) (input := input) h_choice
+  simpa [gen', parsers, h_split, List.foldl_append, prefixParser,
+    generatedRuleParser, generatedSymbolParser] using h_fold
 
 set_option maxHeartbeats 1000000 in
 theorem lower_gen'_complete_of_admissible_rule
@@ -8362,9 +6401,6 @@ theorem lower_gen'_complete_of_admissible_rule
       (((gen' (μ := List) cfg (memoize counter g) n).lower pre.length)
         memo input).1.getD
         (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
-  obtain ⟨rulePrefix, suffix, h_split⟩ :=
-    generatedRuleParser_split_of_rule_mem
-      (cfg := cfg) (recur := memoize counter g) rule.property
   have h_valid' :
       rule.val.length = children.length ∧
       ∀ pair, pair ∈ List.zip rule.val children →
@@ -8379,25 +6415,16 @@ theorem lower_gen'_complete_of_admissible_rule
           have h_pair_valid := h_node.2 sym subtree h_pair
           cases sym <;> cases subtree <;>
             simp [validChildPair] at h_pair_valid ⊢ <;> assumption
-  have h_rulePrefix_memo :
-      lower_memo_complete cfg
-        (rulePrefix.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
-          (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg)))
-        input := by
-    exact lower_memo_complete_of_foldl_sup
-      (cfg := cfg) (input := input)
-      rulePrefix
-      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))
-      (lower_failure_memo_complete cfg input)
+  have h_fold :=
+    lower_gen'_selected_rule_complete
+      (cfg := cfg) (recur := memoize counter g) rule
+      (memo := memo) (input := input)
+      (start := pre.length)
+      (end_ := pre.length + (forestLeaves (cfg := cfg) children).length)
+      (children := children)
+      h_complete
       (by
-        intro p h_p
-        have h_p_all :
-            p ∈ (cfg.rules n).attach.map
-              (generatedRuleParser cfg (memoize counter g) n) := by
-          rw [h_split]
-          simp [h_p]
-        rw [List.mem_map] at h_p_all
-        rcases h_p_all with ⟨rule', _h_rule_mem, rfl⟩
+        intro rule'
         simpa [generatedRuleParser, generatedSymbolParser,
           generatedListSymbolParser] using
           (lower_rule_branch_memo_complete_of_traverse
@@ -8407,42 +6434,16 @@ theorem lower_gen'_complete_of_admissible_rule
               simpa [generatedSymbolParser, generatedListSymbolParser] using
                 (lower_memo_complete_generated_traverse_memoize
                   (cfg := cfg) counter g rule'.val input h_step))))
-  let prefixMemo : MemoData (tag cfg) List :=
-    ↑((((rulePrefix.foldl ParserM.instMaxOfTraversableOfDecidableEq.max
-      (⊥ : ParserM (tag := tag cfg) α List (ParseTree cfg))).lower pre.length)
-      memo input).2)
-  have h_rulePrefix_complete :
-      memo_complete cfg input prefixMemo := by
-    intro n' counter' pre' post' seen' tree' resultMap' h_cache h_root
-      h_adm' h_valid_tree h_input_tree
-    exact (h_rulePrefix_memo memo h_complete pre.length)
-      (by simpa [prefixMemo] using h_cache)
-      h_root h_adm' h_valid_tree h_input_tree
-  have h_children :
-      children ∈
-        (((List.traverse id
-          (rule.val.map (generatedSymbolParser cfg (memoize counter g)))).lower
-          pre.length) prefixMemo input).1.getD
-          (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
-    simpa [generatedSymbolParser, generatedListSymbolParser] using
-      (lower_generated_traverse_complete_of_admissible_valid_pairs
-        (cfg := cfg) counter g
-        (rule := rule.val) (children := children)
-        (input := input) (memo := prefixMemo)
-        (seen := seen) (pre := pre) (post := post)
-        h_rulePrefix_complete h_adm h_valid'.1 h_valid'.2 h_input
-        h_step h_recur)
-  have h_fold :=
-    lower_gen'_rule_complete_after_split
-      (cfg := cfg) (recur := memoize counter g)
-      (n := n) (rule := rule.val) rule.property
-      (pre := rulePrefix) (suffix := suffix)
-      (memo := memo) (input := input)
-      (start := pre.length)
-      (end_ := pre.length + (forestLeaves (cfg := cfg) children).length)
-      (subtrees := children)
-      h_split
-      (by simpa [prefixMemo] using h_children)
+      (by
+        intro selectedMemo h_selected_complete
+        simpa [generatedSymbolParser, generatedListSymbolParser] using
+          (lower_generated_traverse_complete_of_admissible_valid_pairs
+            (cfg := cfg) counter g
+            (rule := rule.val) (children := children)
+            (input := input) (memo := selectedMemo)
+            (seen := seen) (pre := pre) (post := post)
+            h_selected_complete h_adm h_valid'.1 h_valid'.2 h_input
+            h_step h_recur))
   simpa [leaves_node_eq_forestLeaves] using h_fold
 
 set_option maxHeartbeats 1000000 in
@@ -8570,63 +6571,14 @@ theorem memoized_gen_complete_invariant
         (((memoize (Counter.empty : Counter ν) (gen' (μ := List) cfg) n).lower
           pre.length) memo input).1.getD
           (pre.length + tree.leaves.length) []) := by
-  let p (counter : Counter ν)
-      (parser : (n : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) :=
-    (∀ n, lower_memo_complete cfg (parser n) input) ∧
-    (∀ n,
-      counter[n]? ≠ some 0 →
-      ∀ memo : MemoData (tag cfg) List,
-        memo_complete cfg input memo →
-        ∀ start : ℕ,
-        ∀ _h_no_cache :
-          (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-          memo_complete cfg input
-              ((((gen' (μ := List) cfg
-                  (memoize (counter.dec n (input.size - start + 1))
-                    (gen' (μ := List) cfg))
-                  n).lower start)
-                memo input).2.val) ∧
-            resultMap_complete cfg input n (Counter.toKey counter) start
-              ((((gen' (μ := List) cfg
-                  (memoize (counter.dec n (input.size - start + 1))
-                    (gen' (μ := List) cfg))
-                  n).lower start)
-                memo input).1)) ∧
-    (∀ {n : ν} {memo : MemoData (tag cfg) List}
-      {pre post : List α} {seen : List (SpanVisit ν)}
-      {tree : ParseTree cfg},
-      memo_complete cfg input memo →
-      tree.root = Symbol.nonterm n →
-      AdmissibleTreeWith cfg input seen counter tree pre.length →
-      tree.Valid →
-      input.toList = pre ++ tree.leaves ++ post →
-      tree ∈
-        (((parser n).lower pre.length) memo input).1.getD
-          (pre.length + tree.leaves.length) [])
+  let p (counter : Counter ν) (parser : GeneratedFamily cfg) :=
+    GeneratedCompleteCounterInvariant cfg input counter parser
   have h_all : p (Counter.empty : Counter ν)
       (memoize (g := gen' (μ := List) cfg)) := by
     refine memoize_counter_induction (g := gen' (μ := List) cfg) p ?_
     intro counter h_ind
     have h_body_current :
-        ∀ n,
-          counter[n]? ≠ some 0 →
-          ∀ memo : MemoData (tag cfg) List,
-            memo_complete cfg input memo →
-            ∀ start : ℕ,
-            ∀ _h_no_cache :
-              (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-              memo_complete cfg input
-                  ((((gen' (μ := List) cfg
-                      (memoize (counter.dec n (input.size - start + 1))
-                        (gen' (μ := List) cfg))
-                      n).lower start)
-                    memo input).2.val) ∧
-                resultMap_complete cfg input n (Counter.toKey counter) start
-                  ((((gen' (μ := List) cfg
-                      (memoize (counter.dec n (input.size - start + 1))
-                        (gen' (μ := List) cfg))
-                      n).lower start)
-                    memo input).1) := by
+        GeneratedBodyCompleteness cfg input counter (gen' (μ := List) cfg) := by
       intro current h_counter memo h_memo start h_no_cache
       let childCounter : Counter ν :=
         counter.dec current (input.size - start + 1)
@@ -8837,72 +6789,6 @@ theorem exists_minimal_valid_tree_of_derives
   have h_min := Nat.find_min' h_exists_size h_tree'_size
   omega
 
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [DecidableEq α]
-  [DecidableEq ν] [Hashable ν] [Fintype ν] in
-theorem minimal_valid_tree_no_child_same_root_leaves
-  {cfg : @CFG α ν} {n : ν} {input : Array α}
-  {tree child : ParseTree cfg}
-  (h_min :
-    ∀ tree' : ParseTree cfg,
-      tree'.Valid →
-      tree'.root = Symbol.nonterm n →
-      tree'.leaves = input.toList →
-      sizeOf tree ≤ sizeOf tree')
-  (h_child_mem : child ∈ tree.children)
-  (h_child_valid : child.Valid)
-  (h_child_root : child.root = Symbol.nonterm n)
-  (h_child_leaves : child.leaves = input.toList) :
-    False := by
-  have h_le : sizeOf tree ≤ sizeOf child :=
-    h_min child h_child_valid h_child_root h_child_leaves
-  have h_lt : sizeOf child < sizeOf tree :=
-    ParseTree.sizeOf_lt_of_child (parent := tree) h_child_mem
-  omega
-
-omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [DecidableEq α]
-  [DecidableEq ν] [Hashable ν] [Fintype ν] in
-theorem minimal_valid_node_no_smaller_child_replacement_split
-  {cfg : @CFG α ν} {n : ν} {input : Array α}
-  {rule : {rule // rule ∈ cfg.rules n}}
-  {ruleBefore ruleAfter : List (Symbol α ν)} {sym : Symbol α ν}
-  {before after : List (ParseTree cfg)} {old new : ParseTree cfg}
-  (h_rule : rule.val = ruleBefore ++ sym :: ruleAfter)
-  (h_before_len : ruleBefore.length = before.length)
-  (h_valid : (Node (cfg := cfg) n rule (before ++ old :: after)).Valid)
-  (h_parent_leaves :
-    (Node (cfg := cfg) n rule (before ++ old :: after)).leaves = input.toList)
-  (h_min :
-    ∀ tree' : ParseTree cfg,
-      tree'.Valid →
-      tree'.root = Symbol.nonterm n →
-      tree'.leaves = input.toList →
-      sizeOf (Node (cfg := cfg) n rule (before ++ old :: after)) ≤
-        sizeOf tree')
-  (h_new_valid : new.Valid)
-  (h_root : new.root = old.root)
-  (h_leaves : new.leaves = old.leaves)
-  (h_size : sizeOf new < sizeOf old) :
-    False := by
-  let replacement := Node (cfg := cfg) n rule (before ++ new :: after)
-  have h_replacement :=
-    valid_node_replace_child_split
-      (cfg := cfg) (n := n) (rule := rule)
-      (ruleBefore := ruleBefore) (ruleAfter := ruleAfter)
-      (sym := sym) (before := before) (after := after)
-      (old := old) (new := new)
-      h_rule h_before_len h_valid h_new_valid h_root h_leaves h_size
-  have h_replacement_valid : replacement.Valid := h_replacement.1
-  have h_replacement_root : replacement.root = Symbol.nonterm n := rfl
-  have h_replacement_leaves : replacement.leaves = input.toList := by
-    exact h_replacement.2.2.1.trans h_parent_leaves
-  have h_min_le : sizeOf (Node (cfg := cfg) n rule (before ++ old :: after)) ≤
-      sizeOf replacement :=
-    h_min replacement h_replacement_valid h_replacement_root h_replacement_leaves
-  have h_replacement_lt :
-      sizeOf replacement <
-        sizeOf (Node (cfg := cfg) n rule (before ++ old :: after)) :=
-    h_replacement.2.2.2
-  omega
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [DecidableEq α]
   [DecidableEq ν] [Hashable ν] [Fintype ν] in
@@ -9611,67 +7497,13 @@ set_option maxHeartbeats 1000000 in
 set_option linter.unusedSectionVars false in
 theorem gen_sound (cfg : @CFG α ν) n input : sound cfg n (gen (μ := List) cfg n) input := by
   unfold gen
-  let p (counter : Counter ν)
-      (parser : (n : ν) → ParserM (tag := tag cfg) α List (tag cfg n)) :=
-    ∀ input,
-      (∀ n,
-        lower_result_sound cfg n (parser n) input ∧
-          lower_result_bounded cfg (parser n) input ∧
-          lower_memo_wellFormed cfg (parser n) input) ∧
-      (∀ n,
-        counter[n]? ≠ some 0 →
-        ∀ memo : MemoData (tag cfg) List,
-          memo_wellFormed cfg input memo →
-          ∀ start : ℕ,
-          ∀ _h_no_cache :
-            (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-            memo_wellFormed cfg input
-                ((((gen' (μ := List) cfg
-                    (memoize (counter.dec n (input.size - start + 1))
-                      (gen' (μ := List) cfg))
-                    n).lower start)
-                  memo input).2.val) ∧
-              resultMap_sound cfg n
-                ((((gen' (μ := List) cfg
-                    (memoize (counter.dec n (input.size - start + 1))
-                      (gen' (μ := List) cfg))
-                    n).lower start)
-                  memo input).1) ∧
-              resultMap_bounded cfg input start
-                ((((gen' (μ := List) cfg
-                    (memoize (counter.dec n (input.size - start + 1))
-                      (gen' (μ := List) cfg))
-                    n).lower start)
-                  memo input).1))
+  let p (counter : Counter ν) (parser : GeneratedFamily cfg) :=
+    GeneratedSoundCounterInvariant cfg counter parser
   have h_all : p Counter.empty (memoize (g := gen' (μ := List) cfg)) := by
     refine memoize_counter_induction (g := gen' (μ := List) cfg) p ?_
     intro counter h_ind input
     have h_body_current :
-        ∀ n,
-          counter[n]? ≠ some 0 →
-          ∀ memo : MemoData (tag cfg) List,
-            memo_wellFormed cfg input memo →
-            ∀ start : ℕ,
-            ∀ _h_no_cache :
-              (memo.getD n ⊥)[(Counter.toKey counter, start)]? = none,
-              memo_wellFormed cfg input
-                  ((((gen' (μ := List) cfg
-                      (memoize (counter.dec n (input.size - start + 1))
-                        (gen' (μ := List) cfg))
-                      n).lower start)
-                    memo input).2.val) ∧
-                resultMap_sound cfg n
-                  ((((gen' (μ := List) cfg
-                      (memoize (counter.dec n (input.size - start + 1))
-                        (gen' (μ := List) cfg))
-                      n).lower start)
-                    memo input).1) ∧
-                resultMap_bounded cfg input start
-                  ((((gen' (μ := List) cfg
-                      (memoize (counter.dec n (input.size - start + 1))
-                        (gen' (μ := List) cfg))
-                      n).lower start)
-                    memo input).1) := by
+        GeneratedBodySafety cfg input counter (gen' (μ := List) cfg) := by
       intro current h_counter memo h_memo start h_no_cache
       have h_lower :=
         lower_gen'_result_sound_bounded_memoize
