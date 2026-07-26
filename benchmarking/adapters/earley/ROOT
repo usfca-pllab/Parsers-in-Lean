@@ -1,0 +1,4 @@
+session Earley_Benchmark_Adapter = Earley_Parser +
+  options [threads = 1]
+  theories
+    Earley_Benchmark_Adapter

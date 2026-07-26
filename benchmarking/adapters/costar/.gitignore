@@ -1,0 +1,8 @@
+/*.aux
+/*.glob
+/*.vo
+/*.vok
+/*.vos
+/_build/
+/extracted/
+/worker

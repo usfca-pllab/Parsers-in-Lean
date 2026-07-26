@@ -35,7 +35,9 @@ nonmemoized controls, while `Main.lean` is the executable memoization
 comparison.
 
 See [the correctness architecture](docs/memoized-parser-correctness.md) and
-[the pruned Lean-axiom frontier](docs/axiom-proof-frontier.md).
+[the pruned Lean-axiom frontier](docs/axiom-proof-frontier.md). The separate
+[benchmarking guide](benchmarking/README.md) describes the joint Lean, Earley,
+and CoStar benchmark runner, grammar suites, CSV results, and plots.
 
 This project uses Lake with Lean `leanprover/lean4:v4.22.0-rc4`, mathlib, and
 aesop. Build the library with:

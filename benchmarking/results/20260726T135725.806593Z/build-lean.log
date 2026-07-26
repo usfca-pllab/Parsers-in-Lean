@@ -1,0 +1,25 @@
+⚠ [527/856] Replayed ParserCombinators.CFG
+info: ParserCombinators/CFG.lean:84:0: my_cfg.rules : { x // x ∈ my_vars } → List (symbols { x // x ∈ my_alphabet } { x // x ∈ my_vars })
+info: ParserCombinators/CFG.lean:95:0: [[Symbol.term 'a', Symbol.nonterm 1, Symbol.term 'a', Symbol.term 'c'], [Symbol.term 'a', Symbol.term 'c']]
+warning: ParserCombinators/CFG.lean:191:0: automatically included section variable(s) unused in theorem 'CFG.derives_of_append_left':
+  [DecidableEq α]
+  [DecidableEq ν]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq α] [DecidableEq ν] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: ParserCombinators/CFG.lean:199:0: automatically included section variable(s) unused in theorem 'CFG.derives_of_append_right':
+  [DecidableEq α]
+  [DecidableEq ν]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq α] [DecidableEq ν] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: ParserCombinators/CFG.lean:695:0: automatically included section variable(s) unused in theorem 'ParseTree.exists_forest_of_derives':
+  [DecidableEq α]
+  [DecidableEq ν]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq α] [DecidableEq ν] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+Build completed successfully.

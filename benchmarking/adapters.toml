@@ -1,0 +1,11 @@
+[adapters.lean]
+command = [".lake/build/bin/benchmark"]
+build = ["lake", "build", "benchmark"]
+
+[adapters.earley]
+command = ["bash", "benchmarking/adapters/earley/worker.sh"]
+build = ["bash", "benchmarking/adapters/earley/build.sh"]
+
+[adapters.costar]
+command = ["bash", "benchmarking/adapters/costar/worker.sh"]
+build = ["bash", "benchmarking/adapters/costar/build.sh"]

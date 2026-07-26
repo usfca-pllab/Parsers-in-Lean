@@ -1,0 +1,3 @@
+[submodule "related-work/CoStar"]
+	path = related-work/CoStar
+	url = git@github.com:maemre/CoStar.git

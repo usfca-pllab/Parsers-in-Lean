@@ -19,3 +19,8 @@ lean_lib «ParserCombinators» where
 @[default_target]
 lean_exe «Main» where
   root := "Main".toName
+
+@[default_target]
+lean_exe «benchmark» where
+  root := "BenchmarkWorker".toName
+  srcDir := "benchmarking/adapters/lean"

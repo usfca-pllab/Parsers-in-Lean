@@ -1,0 +1,14 @@
+(include_subdirs unqualified)
+
+(library
+ (name costar_indexed)
+ (wrapped false)
+ (modules (:standard \ Worker))
+ (flags (:standard -w -A)))
+
+(executable
+ (name worker)
+ (modules Worker)
+ (libraries costar_indexed unix)
+ (flags (:standard -w -A))
+ (ocamlopt_flags (:standard -O3)))

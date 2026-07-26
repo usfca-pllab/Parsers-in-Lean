@@ -1,0 +1,8 @@
+make: Entering directory '/home/emre/lab/Parsers-in-Lean/related-work/CoStar'
+make -C parser
+make[1]: Entering directory '/home/emre/lab/Parsers-in-Lean/related-work/CoStar/parser'
+make[2]: Nothing to be done for 'real-all'.
+make[1]: Leaving directory '/home/emre/lab/Parsers-in-Lean/related-work/CoStar/parser'
+make: Leaving directory '/home/emre/lab/Parsers-in-Lean/related-work/CoStar'
+make: Entering directory '/home/emre/lab/Parsers-in-Lean/benchmarking/adapters/costar'
+make: Leaving directory '/home/emre/lab/Parsers-in-Lean/benchmarking/adapters/costar'
