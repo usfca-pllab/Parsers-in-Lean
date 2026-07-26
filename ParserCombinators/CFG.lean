@@ -7,6 +7,7 @@ Conventions:
 -/
 import Batteries.Data.List.Basic
 import Mathlib.Data.List.Monad
+import Mathlib.Data.List.Zip
 import Mathlib.Data.Finset.Basic
 import Mathlib.Logic.Relation
 import ParserCombinators.Util
@@ -85,8 +86,7 @@ def my_cfg : @CFG my_alphabet my_vars := {
 -- All possible derivations: a step function
 @[simp, aesop unsafe]
 def yield {cfg : @CFG α ν} (deriv : symbols α ν) : List (symbols α ν) := do
-  let init ← List.inits deriv
-  let Option.some (List.cons (Symbol.nonterm x) tail) := List.getRest deriv init
+  let (init, Symbol.nonterm x :: tail) ← deriv.inits.zip deriv.tails
     | []  -- eliminate positions that do not start with a variable
   (fun rhs => init ++ rhs ++ tail) <$> cfg.rules x
 
@@ -105,130 +105,66 @@ example : my_cfg.yields [term a, nonterm 1, term c] [term a, term c] := by
   simp only [yields]
   decide
 
-theorem yields_not_empty {cfg : @CFG α ν} {w : symbols α ν} (h : cfg.yields [] w) : False := by
-  simp [yields, List.getRest] at h
+omit [DecidableEq α] [DecidableEq ν] in
+theorem yields_iff_decompose
+  {cfg : @CFG α ν} {v u : symbols α ν} :
+    cfg.yields v u ↔
+      ∃ pre n post rhs,
+        v = pre ++ [Symbol.nonterm n] ++ post ∧
+        rhs ∈ cfg.rules n ∧
+        u = pre ++ rhs ++ post := by
+  unfold yields yield
+  simp only [List.bind_eq_flatMap, List.mem_flatMap]
+  constructor
+  · rintro ⟨⟨pre, rest⟩, h_split, h_result⟩
+    rw [List.mem_zip_inits_tails] at h_split
+    cases rest with
+    | nil => simp at h_result
+    | cons sym post =>
+        cases sym with
+        | term _ => simp at h_result
+        | nonterm n =>
+            change u ∈
+              List.map (fun rhs => pre ++ rhs ++ post) (cfg.rules n) at h_result
+            obtain ⟨rhs, h_rhs, h_u⟩ := List.mem_map.mp h_result
+            exact ⟨pre, n, post, rhs, by
+              simpa [List.append_assoc] using h_split.symm, h_rhs, h_u.symm⟩
+  · rintro ⟨pre, n, post, rhs, h_v, h_rhs, rfl⟩
+    subst v
+    refine ⟨(pre, Symbol.nonterm n :: post), ?_, ?_⟩
+    · rw [List.mem_zip_inits_tails]
+      simp [List.append_assoc]
+    · exact List.mem_map.mpr ⟨rhs, h_rhs, rfl⟩
 
+omit [DecidableEq α] [DecidableEq ν] in
 theorem yields_decompose
   {cfg : @CFG α ν} {v u : symbols α ν}
   (h : cfg.yields v u) :
     ∃ pre n post rhs,
       v = pre ++ [Symbol.nonterm n] ++ post ∧
       rhs ∈ cfg.rules n ∧
-      u = pre ++ rhs ++ post := by
-  unfold yields yield at h
-  simp only [List.bind_eq_flatMap, List.mem_flatMap, List.mem_inits] at h
-  obtain ⟨pre, h_prefix, h_rest⟩ := h
-  cases h_get : List.getRest v pre with
-  | none =>
-      simp [h_get] at h_rest
-  | some rest =>
-      cases rest with
-      | nil =>
-          simp [h_get] at h_rest
-      | cons sym post =>
-          cases sym with
-          | term _ =>
-              simp [h_get] at h_rest
-          | nonterm n =>
-              simp [h_get] at h_rest
-              obtain ⟨rhs, h_rhs, h_u⟩ := h_rest
-              refine ⟨pre, n, post, rhs, ?_, h_rhs, ?_⟩
-              · obtain ⟨suffix, h_v⟩ := h_prefix
-                have h_suffix : suffix = Symbol.nonterm n :: post := by
-                  rw [← h_v] at h_get
-                  nth_rw 2 [show pre = pre ++ ([] : List (Symbol α ν)) by simp] at h_get
-                  change List.getRest (pre ++ suffix)
-                    (pre ++ ([] : List (Symbol α ν))) = some (Symbol.nonterm n :: post) at h_get
-                  rw [getRest_elim_prefix] at h_get
-                  simpa [List.getRest] using h_get
-                rw [← h_v, h_suffix]
-                simp
-              · simpa [List.append_assoc] using h_u.symm
+      u = pre ++ rhs ++ post :=
+  yields_iff_decompose.mp h
 
-theorem yields_of_cons {cfg : @CFG α ν} (σ : Symbol α ν) (v w : symbols α ν) (h : cfg.yields v w)
-  : cfg.yields (σ :: v) (σ :: w) := by
-  simp_all
-  obtain ⟨a, h₁, h₂⟩ := h
-  right
-  use a
-  simp [h₁]
-  split at h₂
-  · simp at h₂
-    simp [h₂]
-  · simp at h₂
+omit [DecidableEq α] [DecidableEq ν] in
+theorem yields_of_append_left
+    {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w) :
+    cfg.yields (v₁ ++ v₂) (w ++ v₂) := by
+  obtain ⟨pre, n, post, rhs, h_v, h_rhs, h_w⟩ := yields_decompose h
+  apply yields_iff_decompose.mpr
+  refine ⟨pre, n, post ++ v₂, rhs, ?_, h_rhs, ?_⟩
+  · simp [h_v, List.append_assoc]
+  · simp [h_w, List.append_assoc]
 
-theorem yields_of_append_left {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w)
-    : cfg.yields (v₁ ++ v₂) (w ++ v₂) := by
-  induction v₁ generalizing v₂ w
-  · apply yields_not_empty at h
-    contradiction
-
-  · rename_i head tail ih
-    repeat rewrite [List.cons_append]
-    simp_all [List.getRest]
-    cases h
-    · rename_i h
-      cases head with
-      | term t =>
-        simp at h
-      | nonterm n =>
-        left
-        simp_all
-        obtain ⟨a, h₁, h₂⟩ := h
-        use a
-        subst h₂
-        simp_all only [List.append_assoc, and_self]
-    · rename_i h
-      obtain ⟨a, h₁, h₂⟩ := h
-      right
-      left
-      use a
-      simp [*]
-      split at h₂
-      · simp at h₂
-        obtain ⟨a, h₂⟩ := h₂
-        simp_all
-        use a
-        simp_all only [true_and]
-        obtain ⟨left, right⟩ := h₂
-        subst right
-        simp_all only [List.cons_append, List.append_assoc]
-      · simp at h₂
-
-theorem yields_of_append_right {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w)
-    : cfg.yields (v₂ ++ v₁) (v₂ ++ w) := by
-  induction v₂
-  · simp [-yields, h]
-  · rename_i head tail ih
-    simp
-    right
-    simp at ih
-    obtain ⟨a, ih⟩ := ih
-    split at ih
-    · rename_i ih
-      obtain ⟨h₁, h₂⟩ := ih
-      left
-      use a
-      simp_all only [true_and, List.mem_map]
-      obtain ⟨rule, h₂⟩ := h₂
-      use rule
-      simp [h₂]
-    · rename_i ih
-      obtain ⟨h₁, h₂⟩ := ih
-      contradiction
-    · rename_i ih
-      obtain ⟨a, h₁, h₂⟩ := ih
-      right
-      use (head :: a)
-      simp_all only [yields, symbols, yield, List.append_assoc, List.map_eq_map,
-        List.bind_eq_flatMap, List.mem_flatMap, List.mem_inits, getRest_cons, List.cons_append]
-      constructor
-      · rw [<- List.map_tail, List.mem_map]
-        rw [<- List.map_tail, List.mem_map] at h₁
-        simp [h₁]
-      · split at h₂
-        · simp_all
-        · contradiction
+omit [DecidableEq α] [DecidableEq ν] in
+theorem yields_of_append_right
+    {cfg : @CFG α ν} (v₁ v₂ w : symbols α ν) (h : cfg.yields v₁ w) :
+    cfg.yields (v₂ ++ v₁) (v₂ ++ w) := by
+  obtain ⟨pre, n, post, rhs, h_v, h_rhs, h_w⟩ := yields_decompose h
+  apply yields_iff_decompose.mpr
+  refine ⟨v₂ ++ pre, n, post, rhs, ?_, h_rhs, ?_⟩
+  · simp [h_v, List.append_assoc]
+  · simp [h_w, List.append_assoc]
 
 -- Derives: transitive reflexive closure of yields.
 -- NOTE(maemre): This is potentially noncomputable, might need a step index
@@ -251,77 +187,6 @@ example : my_cfg.derives [term a, nonterm 1, term c] [term a, term a, term c] :=
   · refine @Relation.ReflTransGen.tail (symbols my_alphabet my_vars) rel y y z Relation.ReflTransGen.refl ?_
     simp only [rel, yields]
     decide
-
--- Indexed version of `derives`
-def derives_nth {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Prop := v = w ∨ match n with
-  | 0 => v = w
-  | Nat.succ n' => ∃ u, cfg.yields v u ∧ cfg.derives_nth n' u w
-
--- Decidable instance for the indexed step relation
-instance {cfg : @CFG α ν} (n : ℕ) (v w : symbols α ν) : Decidable (cfg.derives_nth n v w) := by induction n generalizing v with
-  | zero =>
-    unfold derives_nth
-    refine decidable_of_iff (v = w) ?_
-    simp only [or_self]
-  | succ n' ih =>
-    unfold derives_nth
-    if h : v = w then exact isTrue (Or.inl h)
-    else
-      let recur (u : symbols α ν) := cfg.derives_nth n' u w
-      refine decidable_of_iff (∃ u ∈ (cfg.yield v).toFinset, recur u) ?_
-      unfold yields
-      simp only [h, false_or]
-      have h' (u : symbols α ν) := @List.mem_toFinset (symbols α ν) inferInstance (cfg.yield v) u
-      have h'' (p :symbols α ν → Prop) : (∃ u ∈ cfg.yield v, p u) <-> (∃ u ∈ (cfg.yield v).toFinset, p u) := by simp
-      rw [h'' recur]
-
--- With the `Decidable` instance above, we can *inefficiently* decide bounded instances of the derivation relation.
-example : my_cfg.derives_nth 2 [term a, nonterm 1, term c] [term a, term a, term c] := by decide
--- this search is really inefficient but it works
--- example : my_cfg.derives_nth 5 [term a, nonterm 1, term c] [term a, term a, term a, term a, term c] := by decide
-
-private lemma derives_nth_of_derives {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w -> ∃ n : ℕ, cfg.derives_nth n v w := by
-  intro h
-  refine Relation.ReflTransGen.head_induction_on h ?_ ?_
-  · use 0
-    simp [derives_nth]
-  · rintro v u h_yields h_derives ⟨n, ih⟩
-    use n + 1
-    unfold derives_nth
-    right
-    simp only []
-    use u
-
-private lemma derives_of_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : (∃ n : ℕ, cfg.derives_nth n v w) -> cfg.derives v w := by
-  intro ⟨n, h⟩
-  induction n generalizing v with
-  | zero =>
-    simp only [derives_nth, or_self] at h
-    simp only [derives, h]
-    exact Relation.ReflTransGen.refl
-  | succ n' ih =>
-    unfold derives_nth at h
-    simp only [] at h
-    refine Or.by_cases h ?_ ?_
-    · intro h
-      simp only [derives, h]
-      exact Relation.ReflTransGen.refl
-    · intro ⟨u, ⟨h_yields, h_recur⟩⟩
-      unfold derives
-      refine @Relation.ReflTransGen.head (symbols α ν) cfg.yields v u w ?_ ?_
-      · exact h_yields
-      · exact ih u h_recur
-
-theorem derives_iff_derives_nth {cfg : @CFG α ν} (v w : symbols α ν) : cfg.derives v w ↔ ∃ n : ℕ, cfg.derives_nth n v w :=
-  ⟨derives_nth_of_derives v w, derives_of_derives_nth v w⟩
-
-theorem derives_empty_of_empty  {cfg : @CFG α ν} {w : symbols α ν} (h₁ : cfg.derives [] w) : w = [] := by
-  simp [derives] at h₁
-  induction h₁ with
-  | refl => rfl
-  | tail _ h_yields h_empty =>
-      subst h_empty
-      simp [List.getRest] at h_yields
 
 theorem derives_of_append_left {cfg : @CFG α ν} {v₁ v₂ w : symbols α ν} (h : cfg.derives v₁ w)
     : cfg.derives (v₁ ++ v₂) (w ++ v₂) := by
@@ -451,11 +316,6 @@ def isNode {cfg : @CFG α ν} : (ParseTree cfg) → Bool
   | Leaf _ => false
 
 @[simp]
-def isLeaf {cfg : @CFG α ν} : (ParseTree cfg) → Bool
-  | Node _ _ _ => false
-  | Leaf _ => true
-
-@[simp]
 def nonterminal {cfg : @CFG α ν} (tree : ParseTree cfg) (h : tree.isNode) : ν := match tree with
   | ParseTree.Node n _ _ => n
   | ParseTree.Leaf _ => by contradiction
@@ -529,12 +389,6 @@ decreasing_by
 #guard my_tree₂.valid
 #guard my_tree₃.valid
 
-lemma lift_forall {α} {p q : α → Prop} (h : ∀ x, p x ↔ q x) : (∀ x, p x) ↔ (∀ x, q x) :=
-    of_eq_true
-      (Eq.trans
-        (congrArg (fun x ↦ x ↔ ∀ (x : α), q x) (forall_congr fun x ↦ (fun x ↦ propext (h x)) x))
-        (iff_self (∀ (x : α), q x)))
-
 lemma valid_eq_true_iff_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : tree.valid = true ↔ tree.Valid := match h : tree with
   | ParseTree.Leaf _ => by unfold valid Valid ; decide
   | ParseTree.Node n rule children => by {
@@ -542,9 +396,9 @@ lemma valid_eq_true_iff_Valid {cfg : @CFG α ν} {tree : ParseTree cfg} : tree.v
     subst h
     simp_all [symbols]
     intro h_eq_len
-    apply lift_forall
+    apply forall_congr'
     intro a
-    repeat (apply lift_forall ; intro)
+    repeat (apply forall_congr' ; intro)
     rename_i subtree h_mem
     match a, h : subtree with
     | nonterm _, Node _ _ _ =>
@@ -578,60 +432,60 @@ theorem derives_of_Valid_tree {cfg : @CFG α ν} {tree : ParseTree cfg} (h : tre
     simp at h
     obtain ⟨h_len, h_recur⟩ := h
     have ⟨rule, property⟩ := rule_and_mem
-    -- apply derives_of_derives_nth
-    refine @Relation.ReflTransGen.head (symbols α ν) cfg.yields ?_ rule ?_ ?_ ?_
-    · unfold yields
-      unfold yield
-      simp [List.getRest, property]
-    · simp only [symbols, leaves, List.flatMap_subtype, List.unattach_attach]
-      have derives_of_children (subtree : ParseTree cfg) (a : Symbol α ν) (h_mem : (a, subtree) ∈ (List.zip rule children))
-          : cfg.derives [a] (subtree.leaves.map term)
-        := by {
-          have subtree_root_eq_symbol : subtree.root = a := by
-            have helper := h_recur a subtree h_mem
-            split at helper
-            · simp_all
-            · simp_all
-            · simp_all
-          replace h_recur := h_recur a subtree h_mem
-          rw [<- subtree_root_eq_symbol]
-          apply derives_of_Valid_tree
-          unfold Valid
-          cases h_subtree : subtree
-          · simp
-          · cases h_a : a with
-            | term =>
-              subst h_a h_subtree
-              simp at h_recur
-            | nonterm =>
-              subst h_a h_subtree
-              simp only at h_recur
-              unfold Valid at h_recur
-              simp [h_recur]
-      }
+    have h_step : cfg.yields [Symbol.nonterm n] rule :=
+      CFG.yields_iff_decompose.mpr
+        ⟨[], n, [], rule, by simp, property, by simp⟩
+    refine Relation.ReflTransGen.head h_step ?_
+    simp only [symbols, leaves, List.flatMap_subtype, List.unattach_attach]
+    have derives_of_children (subtree : ParseTree cfg) (a : Symbol α ν)
+        (h_mem : (a, subtree) ∈ List.zip rule children) :
+        cfg.derives [a] (subtree.leaves.map term) := by {
+      have subtree_root_eq_symbol : subtree.root = a := by
+        have helper := h_recur a subtree h_mem
+        split at helper
+        · simp_all
+        · simp_all
+        · simp_all
+      replace h_recur := h_recur a subtree h_mem
+      rw [<- subtree_root_eq_symbol]
+      apply derives_of_Valid_tree
+      unfold Valid
+      cases h_subtree : subtree
+      · simp
+      · cases h_a : a with
+        | term =>
+          subst h_a h_subtree
+          simp at h_recur
+        | nonterm =>
+          subst h_a h_subtree
+          simp only at h_recur
+          unfold Valid at h_recur
+          simp [h_recur]
+    }
 
-      simp at h_len
-      clear h_recur property
-      induction h : rule.zip children generalizing rule children with
-      | nil =>
-        replace h := zip_eq_nil_of_eq_length h_len h
-        simp [h]
-        exact Relation.ReflTransGen.refl
-      | cons head tail ih =>
-        obtain ⟨symbol, subtree⟩ := head
-        obtain ⟨symbols, trees, h_rule, h_children, h_tail⟩ := List.zip_eq_cons_iff.mp h
-        subst h_rule h_children
-        simp only [List.length_cons, Nat.add_right_cancel_iff] at h_len
-        obtain ih' := by
-          refine ih trees symbols h_len ?_ (symm h_tail)
-          · intro subtree symbol h_mem
-            refine derives_of_children subtree symbol ?_
-            simp [h_mem]
-        rw [List.flatMap_cons, List.map_append, <- List.singleton_append]
-        refine derives_of_append ?_ ?_
-        · refine derives_of_children subtree symbol ?_
-          simp
-        · exact ih'
+    simp at h_len
+    clear h_recur property h_step
+    induction h : rule.zip children generalizing rule children with
+    | nil =>
+      replace h := zip_eq_nil_of_eq_length h_len h
+      simp [h]
+      exact Relation.ReflTransGen.refl
+    | cons head tail ih =>
+      obtain ⟨symbol, subtree⟩ := head
+      obtain ⟨symbols, trees, h_rule, h_children, h_tail⟩ :=
+        List.zip_eq_cons_iff.mp h
+      subst h_rule h_children
+      simp only [List.length_cons, Nat.add_right_cancel_iff] at h_len
+      obtain ih' := by
+        refine ih trees symbols h_len ?_ (symm h_tail)
+        · intro subtree symbol h_mem
+          refine derives_of_children subtree symbol ?_
+          simp [h_mem]
+      rw [List.flatMap_cons, List.map_append, <- List.singleton_append]
+      refine derives_of_append ?_ ?_
+      · refine derives_of_children subtree symbol ?_
+        simp
+      · exact ih'
   }
 termination_by tree
 decreasing_by
@@ -652,28 +506,67 @@ def ForestValid {cfg : @CFG α ν}
     ∀ pair, pair ∈ syms.zip forest → ForestPairValid (cfg := cfg) pair
 
 omit [DecidableEq α] [DecidableEq ν] in
-theorem forestLeaves_map_leaf {cfg : @CFG α ν} (w : List α) :
-    forestLeaves (cfg := cfg) (w.map Leaf) = w := by
-  induction w with
-  | nil => rfl
-  | cons a rest ih =>
-      unfold forestLeaves at ih ⊢
-      simp only [List.map_cons, List.flatMap_cons]
-      have h_leaf : (Leaf (cfg := cfg) a).leaves = [a] := by
-        unfold leaves
-        rfl
-      rw [h_leaf]
-      simp [ih]
+theorem ForestPairValid_iff_valid_and_root
+    {cfg : @CFG α ν} {sym : Symbol α ν} {tree : ParseTree cfg} :
+    ForestPairValid (cfg := cfg) (sym, tree) ↔
+      tree.Valid ∧ tree.root = sym := by
+  cases sym <;> cases tree <;>
+    simp [ForestPairValid, Valid, root, eq_comm, and_comm]
 
 omit [DecidableEq α] [DecidableEq ν] in
-theorem forestLeaves_append
-  {cfg : @CFG α ν} (xs ys : List (ParseTree cfg)) :
-    forestLeaves (xs ++ ys) = forestLeaves xs ++ forestLeaves ys := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih =>
-      unfold forestLeaves at ih ⊢
-      simp [ih, List.append_assoc]
+theorem valid_node_iff_ForestValid
+    {cfg : @CFG α ν} {n : ν}
+    {rule : {rule // rule ∈ cfg.rules n}}
+    {children : List (ParseTree cfg)} :
+    (Node (cfg := cfg) n rule children).Valid ↔
+      ForestValid (cfg := cfg) rule.val children := by
+  unfold Valid ForestValid
+  constructor <;> rintro ⟨h_len, h_pairs⟩
+  all_goals refine ⟨h_len, ?_⟩
+  all_goals rintro ⟨sym, tree⟩ h_mem
+  all_goals have h_pair := h_pairs (sym, tree) h_mem
+  all_goals cases sym <;> cases tree <;>
+    simp [ForestPairValid] at h_pair ⊢ <;> assumption
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem ForestValid_iff_forall₂
+    {cfg : @CFG α ν} {syms : symbols α ν}
+    {forest : List (ParseTree cfg)} :
+    ForestValid (cfg := cfg) syms forest ↔
+      List.Forall₂
+        (fun sym tree => ForestPairValid (cfg := cfg) (sym, tree))
+        syms forest := by
+  unfold ForestValid
+  constructor
+  · rintro ⟨h_len, h_pairs⟩
+    exact List.forall₂_iff_zip.mpr
+      ⟨h_len, fun h_mem => h_pairs _ h_mem⟩
+  · intro h
+    obtain ⟨h_len, h_pairs⟩ := List.forall₂_iff_zip.mp h
+    refine ⟨h_len, ?_⟩
+    rintro ⟨sym, tree⟩ h_mem
+    exact h_pairs h_mem
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem valid_node_child_at
+  {cfg : @CFG α ν} {n} {rule : {rule // rule ∈ cfg.rules n}} {children}
+  (hvalid : (Node n rule children).Valid)
+  (i : Fin rule.val.length) (j : Fin children.length)
+  (hji : j.val = i.val) :
+  children[j].Valid ∧ children[j].root = rule.val[i] := by
+  have hforall :=
+    ForestValid_iff_forall₂.mp (valid_node_iff_ForestValid.mp hvalid)
+  let k : Fin children.length := ⟨i.val, hforall.length_eq ▸ i.isLt⟩
+  have hp := hforall.get i.isLt k.isLt
+  change ForestPairValid (rule.val[i], children[k]) at hp
+  rw [ForestPairValid_iff_valid_and_root] at hp
+  have hkj : k = j := Fin.ext hji.symm
+  simpa [hkj] using hp
+
+omit [DecidableEq α] [DecidableEq ν] in
+theorem forestLeaves_map_leaf {cfg : @CFG α ν} (w : List α) :
+    forestLeaves (cfg := cfg) (w.map Leaf) = w := by
+  induction w <;> simp_all [forestLeaves, leaves]
 
 omit [DecidableEq α] [DecidableEq ν] in
 theorem leaves_node_eq_forestLeaves
@@ -685,38 +578,19 @@ theorem leaves_node_eq_forestLeaves
 omit [DecidableEq α] [DecidableEq ν] in
 theorem ForestValid_map_leaf {cfg : @CFG α ν} (w : List α) :
     ForestValid (cfg := cfg) (w.map Symbol.term) (w.map Leaf) := by
+  rw [ForestValid_iff_forall₂]
   induction w with
-  | nil =>
-      unfold ForestValid
-      simp
+  | nil => exact List.Forall₂.nil
   | cons a rest ih =>
-      unfold ForestValid at ih ⊢
-      constructor
-      · simp
-      · intro pair h_pair
-        simp only [List.map_cons, List.zip_cons_cons, List.mem_cons] at h_pair
-        cases h_pair with
-        | inl h_head =>
-            cases h_head
-            rfl
-        | inr h_tail =>
-            exact ih.2 pair h_tail
+      exact List.Forall₂.cons (by simp [ForestPairValid]) ih
 
 omit [DecidableEq α] [DecidableEq ν] in
 theorem valid_node_of_ForestValid
   {cfg : @CFG α ν} {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
   {children : List (ParseTree cfg)}
   (h : ForestValid (cfg := cfg) rule.val children) :
-    (Node (cfg := cfg) n rule children).Valid := by
-  unfold ForestValid at h
-  unfold Valid
-  constructor
-  · exact h.1
-  · intro pair h_pair
-    have h_pair_valid := h.2 pair h_pair
-    cases pair with
-    | mk sym tree =>
-        cases sym <;> cases tree <;> simp [ForestPairValid] at h_pair_valid ⊢ <;> exact h_pair_valid
+    (Node (cfg := cfg) n rule children).Valid :=
+  valid_node_iff_ForestValid.mpr h
 
 omit [DecidableEq α] [DecidableEq ν] in
 theorem ForestValid_singleton_node
@@ -724,13 +598,10 @@ theorem ForestValid_singleton_node
   {children : List (ParseTree cfg)}
   (h : ForestValid (cfg := cfg) rule.val children) :
     ForestValid (cfg := cfg) [Symbol.nonterm n] [Node (cfg := cfg) n rule children] := by
-  unfold ForestValid
-  constructor
-  · simp
-  · intro pair h_pair
-    simp at h_pair
-    cases h_pair
-    simp [ForestPairValid, valid_node_of_ForestValid h]
+  rw [ForestValid_iff_forall₂]
+  exact List.Forall₂.cons
+    (by simp [ForestPairValid, valid_node_iff_ForestValid.mpr h])
+    List.Forall₂.nil
 
 omit [DecidableEq α] [DecidableEq ν] in
 theorem ForestValid_append
@@ -739,15 +610,8 @@ theorem ForestValid_append
   (hx : ForestValid (cfg := cfg) xs xf)
   (hy : ForestValid (cfg := cfg) ys yf) :
     ForestValid (cfg := cfg) (xs ++ ys) (xf ++ yf) := by
-  unfold ForestValid at hx hy ⊢
-  constructor
-  · simp [hx.1, hy.1]
-  · intro pair h_pair
-    rw [List.zip_append] at h_pair
-    · cases List.mem_append.mp h_pair with
-      | inl h_left => exact hx.2 pair h_left
-      | inr h_right => exact hy.2 pair h_right
-    · exact hx.1
+  rw [ForestValid_iff_forall₂] at hx hy ⊢
+  exact List.rel_append hx hy
 
 omit [DecidableEq α] [DecidableEq ν] in
 theorem ForestValid_append_inv
@@ -757,40 +621,13 @@ theorem ForestValid_append_inv
       forest = xf ++ yf ∧
       ForestValid (cfg := cfg) xs xf ∧
       ForestValid (cfg := cfg) ys yf := by
-  induction xs generalizing forest with
-  | nil =>
-      refine ⟨[], forest, by simp, ?_, ?_⟩
-      · unfold ForestValid
-        simp
-      · simpa using h
-  | cons x xs ih =>
-      obtain ⟨h_len, h_pairs⟩ := h
-      cases forest with
-      | nil =>
-          simp at h_len
-      | cons tree forestTail =>
-          have h_head : ForestPairValid (cfg := cfg) (x, tree) := by
-            exact h_pairs (x, tree) (by simp)
-          have h_tail : ForestValid (cfg := cfg) (xs ++ ys) forestTail := by
-            unfold ForestValid
-            constructor
-            · simpa using h_len
-            · intro pair h_pair
-              exact h_pairs pair (by simp [h_pair])
-          obtain ⟨xf, yf, h_tail_eq, h_xs, h_ys⟩ := ih h_tail
-          refine ⟨tree :: xf, yf, ?_, ?_, h_ys⟩
-          · simp [h_tail_eq]
-          · unfold ForestValid at h_xs ⊢
-            constructor
-            · simp [h_xs.1]
-            · intro pair h_pair
-              simp at h_pair
-              cases h_pair with
-              | inl h_eq =>
-                  cases h_eq
-                  exact h_head
-              | inr h_tail_pair =>
-                  exact h_xs.2 pair h_tail_pair
+  rw [ForestValid_iff_forall₂] at h
+  refine ⟨forest.take xs.length, forest.drop xs.length,
+    (List.take_append_drop xs.length forest).symm, ?_, ?_⟩
+  · rw [ForestValid_iff_forall₂]
+    simpa using List.forall₂_take xs.length h
+  · rw [ForestValid_iff_forall₂]
+    simpa using List.forall₂_drop xs.length h
 
 omit [DecidableEq α] [DecidableEq ν] in
 theorem exists_forest_of_terminals {cfg : @CFG α ν} (w : List α) :
@@ -847,25 +684,13 @@ theorem exists_Valid_tree_of_singleton_forest
   (h_leaves : forestLeaves forest = w) :
     ∃ tree : ParseTree cfg,
       tree.Valid ∧ tree.root = Symbol.nonterm n ∧ tree.leaves = w := by
-  obtain ⟨h_len, h_pairs⟩ := h_valid
-  cases forest with
-  | nil =>
-      simp at h_len
-  | cons tree tail =>
-      cases tail with
-      | nil =>
-          have h_pair := h_pairs (Symbol.nonterm n, tree) (by simp)
-          cases tree with
-          | Leaf a =>
-              simp [ForestPairValid] at h_pair
-          | Node n' rule children =>
-              simp [ForestPairValid] at h_pair
-              obtain ⟨h_n, h_tree_valid⟩ := h_pair
-              cases h_n
-              refine ⟨Node n rule children, h_tree_valid, rfl, ?_⟩
-              simpa [forestLeaves] using h_leaves
-      | cons _ _ =>
-          simp at h_len
+  rw [ForestValid_iff_forall₂] at h_valid
+  cases h_valid with
+  | cons h_pair h_tail =>
+      cases h_tail
+      rw [ForestPairValid_iff_valid_and_root] at h_pair
+      exact ⟨_, h_pair.1, h_pair.2, by
+        simpa [forestLeaves] using h_leaves⟩
 
 theorem exists_forest_of_derives
   {cfg : @CFG α ν} {sentential : symbols α ν} {w : List α}

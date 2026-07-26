@@ -1155,25 +1155,13 @@ theorem traversable_foldl_joinUnderCache_memo_wellFormed
       memo_wellFormed cfg input memo →
       memo_wellFormed cfg input
         (((Traversable.foldl joinUnderCache acc actions) memo input).2.val) := by
-  induction actions generalizing acc with
-  | nil =>
-      intro memo h_memo
-      change memo_wellFormed cfg input ((acc memo input).2.val)
-      exact h_acc memo h_memo
-  | cons action actions ih =>
-      intro memo h_memo
-      rw [traversable_foldl_cons]
-      exact ih
-        (acc := joinUnderCache acc action)
-        (by
-          exact joinUnderCache_memo_wellFormed
-            (cfg := cfg) (input := input)
-            (acc := acc) (act := action)
-            h_acc
-            (fun memo h_memo => h_actions action (by simp) memo h_memo))
-        (fun action' h_action' memo h_memo =>
-          h_actions action' (by simp [h_action']) memo h_memo)
-        memo h_memo
+  rw [Traversable.foldl_toList, Traversable.toList_eq_self]
+  exact List.foldlRecOn actions joinUnderCache h_acc (by
+    intro current h_current action h_action
+    exact joinUnderCache_memo_wellFormed
+      (cfg := cfg) (input := input)
+      (acc := current) (act := action)
+      h_current (h_actions action h_action))
 
 omit [Fintype ν] in
 theorem list_foldl_traversable_joinUnderCache_memo_wellFormed
@@ -1199,26 +1187,13 @@ theorem list_foldl_traversable_joinUnderCache_memo_wellFormed
       memo_wellFormed cfg input
         (((List.foldl (Traversable.foldl joinUnderCache) acc groups)
           memo input).2.val) := by
-  induction groups generalizing acc with
-  | nil =>
-      intro memo h_memo
-      change memo_wellFormed cfg input ((acc memo input).2.val)
-      exact h_acc memo h_memo
-  | cons group groups ih =>
-      intro memo h_memo
-      simp only [List.foldl_cons]
-      exact ih
-        (acc := Traversable.foldl joinUnderCache acc group)
-        (by
-          exact traversable_foldl_joinUnderCache_memo_wellFormed
-            (cfg := cfg) (input := input)
-            (actions := group) (acc := acc)
-            h_acc
-            (fun action h_action memo h_memo =>
-              h_groups group (by simp) action h_action memo h_memo))
-        (fun group' h_group' action h_action memo h_memo =>
-          h_groups group' (by simp [h_group']) action h_action memo h_memo)
-        memo h_memo
+  exact
+    List.foldlRecOn groups (Traversable.foldl joinUnderCache) h_acc (by
+      intro current h_current group h_group
+      exact traversable_foldl_joinUnderCache_memo_wellFormed
+        (cfg := cfg) (input := input)
+        (actions := group) (acc := current)
+        h_current (h_groups group h_group))
 
 omit [Fintype ν] in
 theorem bindContinue_memo_wellFormed
@@ -2058,142 +2033,12 @@ theorem memo_wellFormed_memoizeStep_of_guarded_body
 
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma valid_node_terminal_child
-  {cfg : @CFG α ν}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}} {children : List (ParseTree cfg)}
-  (h_valid : (Node (cfg := cfg) n rule children).Valid)
-  (i : Fin rule.val.length)
-  (j : Fin children.length)
-  (h_j : j.1 = i.1)
-  {a : α}
-  (h_sym : rule.val[i] = Symbol.term a)
-  : children[j] = Leaf (cfg := cfg) a := by
-  have h_valid' :
-      rule.val.length = children.length ∧
-      ∀ pair (_h : pair ∈ List.zip rule.val children), match _h_pair : pair, _h with
-        | ⟨Symbol.term a, Leaf b⟩, _ => a = b
-        | ⟨Symbol.nonterm n, subtree@_h:(Node n' _ _)⟩, _ => n = n' ∧ subtree.Valid
-        | _, _ => False := by
-    simpa [ParseTree.Valid] using h_valid
-  have h_pair_mem : (rule.val[i], children[j]) ∈ rule.val.zip children := by
-    have h_zip_len : (rule.val.zip children).length = rule.val.length := by
-      simp [List.length_zip, h_valid'.1]
-    let k : Fin (rule.val.zip children).length := ⟨i.1, by simp [h_zip_len, i.2]⟩
-    have h_mem : (rule.val.zip children)[k] ∈ rule.val.zip children := List.getElem_mem k.2
-    simpa [k, h_j] using h_mem
-  cases h_children : children[j] with
-  | Leaf b =>
-      have h_pair_mem' : (Symbol.term a, Leaf (cfg := cfg) b) ∈ rule.val.zip children := by
-        simpa [h_sym, h_children] using h_pair_mem
-      have h_child := h_valid'.2 (Symbol.term a, Leaf (cfg := cfg) b) h_pair_mem'
-      have h_eq : a = b := by
-        simp at h_child
-        exact h_child
-      simp [h_eq]
-  | Node n' rule' children' =>
-      have h_pair_mem' : (Symbol.term a, Node (cfg := cfg) n' rule' children') ∈ rule.val.zip children := by
-        simpa [h_sym, h_children] using h_pair_mem
-      have h_child := h_valid'.2 (Symbol.term a, Node (cfg := cfg) n' rule' children') h_pair_mem'
-      have h_false : False := by
-        simp at h_child
-      exact False.elim h_false
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma valid_node_nonterminal_child
-  {cfg : @CFG α ν}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}} {children : List (ParseTree cfg)}
-  (h_valid : (Node (cfg := cfg) n rule children).Valid)
-  (i : Fin rule.val.length)
-  (j : Fin children.length)
-  (h_j : j.1 = i.1)
-  {childN : ν}
-  (h_sym : rule.val[i] = Symbol.nonterm childN)
-  : ∃ rule' children',
-      children[j] = Node (cfg := cfg) childN rule' children' ∧
-      (Node (cfg := cfg) childN rule' children').Valid := by
-  have h_valid' :
-      rule.val.length = children.length ∧
-      ∀ pair (_h : pair ∈ List.zip rule.val children), match _h_pair : pair, _h with
-        | ⟨Symbol.term a, Leaf b⟩, _ => a = b
-        | ⟨Symbol.nonterm n, subtree@_h:(Node n' _ _)⟩, _ => n = n' ∧ subtree.Valid
-        | _, _ => False := by
-    simpa [ParseTree.Valid] using h_valid
-  have h_pair_mem : (rule.val[i], children[j]) ∈ rule.val.zip children := by
-    have h_zip_len : (rule.val.zip children).length = rule.val.length := by
-      simp [List.length_zip, h_valid'.1]
-    let k : Fin (rule.val.zip children).length := ⟨i.1, by simp [h_zip_len, i.2]⟩
-    have h_mem : (rule.val.zip children)[k] ∈ rule.val.zip children := List.getElem_mem k.2
-    simpa [k, h_j] using h_mem
-  cases h_children : children[j] with
-  | Leaf b =>
-      have h_pair_mem' : (Symbol.nonterm childN, Leaf (cfg := cfg) b) ∈ rule.val.zip children := by
-        simpa [h_sym, h_children] using h_pair_mem
-      have h_child := h_valid'.2 (Symbol.nonterm childN, Leaf (cfg := cfg) b) h_pair_mem'
-      have h_false : False := by
-        simp at h_child
-      exact False.elim h_false
-  | Node n' rule' children' =>
-      have h_pair_mem' : (Symbol.nonterm childN, Node (cfg := cfg) n' rule' children') ∈ rule.val.zip children := by
-        simpa [h_sym, h_children] using h_pair_mem
-      have h_child := h_valid'.2 (Symbol.nonterm childN, Node (cfg := cfg) n' rule' children') h_pair_mem'
-      have h_valid_root : childN = n' ∧ (Node (cfg := cfg) n' rule' children').Valid := by
-        simp at h_child
-        exact h_child
-      obtain ⟨h_eq, h_subvalid⟩ := h_valid_root
-      cases h_eq
-      exact ⟨rule', children', rfl, h_subvalid⟩
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma valid_node_child_node_valid_of_mem
-  {cfg : @CFG α ν}
-  {n childN : ν}
-  {rule : {rule // rule ∈ cfg.rules n}}
-  {children : List (ParseTree cfg)}
-  {childRule : {rule // rule ∈ cfg.rules childN}}
-  {grandchildren : List (ParseTree cfg)}
-  (h_valid : (Node (cfg := cfg) n rule children).Valid)
-  (h_mem : Node (cfg := cfg) childN childRule grandchildren ∈ children) :
-    (Node (cfg := cfg) childN childRule grandchildren).Valid := by
-  have h_valid' :
-      rule.val.length = children.length ∧
-      ∀ pair (_h : pair ∈ List.zip rule.val children), match _h_pair : pair, _h with
-        | ⟨Symbol.term a, Leaf b⟩, _ => a = b
-        | ⟨Symbol.nonterm n, subtree@_h:(Node n' _ _)⟩, _ => n = n' ∧ subtree.Valid
-        | _, _ => False := by
-    simpa [ParseTree.Valid] using h_valid
-  obtain ⟨j, h_child_at⟩ := List.mem_iff_get.mp h_mem
-  let i : Fin rule.val.length := ⟨j.1, by simp [h_valid'.1, j.2]⟩
-  cases h_sym : rule.val[i] with
-  | term a =>
-      have h_leaf := valid_node_terminal_child
-        (cfg := cfg) h_valid i j rfl h_sym
-      have h_node : children[j] =
-          Node (cfg := cfg) childN childRule grandchildren := h_child_at
-      rw [h_leaf] at h_node
-      simp at h_node
-  | nonterm expected =>
-      obtain ⟨actualRule, actualChildren, h_node, h_subvalid⟩ :=
-        valid_node_nonterminal_child
-          (cfg := cfg) h_valid i j rfl h_sym
-      have h_node' : Node (cfg := cfg) expected actualRule actualChildren =
-          Node (cfg := cfg) childN childRule grandchildren := by
-        exact h_node.symm.trans h_child_at
-      cases h_node'
-      exact h_subvalid
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma list_sizeOf_replace_lt
   {δ : Type u} [SizeOf δ]
   {before after : List δ} {old new : δ}
   (h_lt : sizeOf new < sizeOf old) :
     sizeOf (before ++ new :: after) < sizeOf (before ++ old :: after) := by
-  induction before with
-  | nil =>
-      simp
-      omega
-  | cons head tail ih =>
-      simp
-      omega
+  induction before <;> simp_all
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma node_sizeOf_replace_child_lt
@@ -2215,26 +2060,18 @@ lemma list_split_at_of_length_cons
     ∃ xsBefore x xsAfter,
       xs = xsBefore ++ x :: xsAfter ∧
       xsBefore.length = before.length := by
-  induction before generalizing xs with
-  | nil =>
-      cases xs with
-      | nil =>
-          simp at h_len
-      | cons x xsTail =>
-          exact ⟨[], x, xsTail, by simp⟩
-  | cons _ beforeTail ih =>
-      cases xs with
-      | nil =>
-          simp at h_len
-      | cons x xsTail =>
-          have h_tail_len :
-              xsTail.length = (beforeTail ++ child :: after).length := by
-            simpa using h_len
-          obtain ⟨xsBefore, split, xsAfter, h_split, h_before_len⟩ :=
-            ih h_tail_len
-          refine ⟨x :: xsBefore, split, xsAfter, ?_, ?_⟩
-          · simp [h_split]
-          · simp [h_before_len]
+  have hi : before.length < xs.length := by
+    simp only [List.length_append, List.length_cons] at h_len
+    omega
+  refine ⟨xs.take before.length, xs[before.length],
+    xs.drop (before.length + 1), ?_, ?_⟩
+  · calc
+      xs = xs.take before.length ++ xs.drop before.length :=
+        (List.take_append_drop before.length xs).symm
+      _ = xs.take before.length ++
+          xs[before.length] :: xs.drop (before.length + 1) := by
+        rw [List.drop_eq_getElem_cons hi]
+  · simp [Nat.le_of_lt hi]
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma valid_node_child_valid_of_split
@@ -2243,17 +2080,12 @@ lemma valid_node_child_valid_of_split
   {before after : List (ParseTree cfg)} {child : ParseTree cfg}
   (h_valid : (Node (cfg := cfg) n rule (before ++ child :: after)).Valid) :
     child.Valid := by
-  cases child with
-  | Leaf a =>
-      simp [ParseTree.Valid]
-  | Node childN childRule grandchildren =>
-      exact valid_node_child_node_valid_of_mem
-        (cfg := cfg) h_valid (by simp)
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-abbrev forestLeaves {cfg : @CFG α ν} (children : List (ParseTree cfg)) : List α :=
-  children.flatMap fun node => node.leaves
-
+  have h_len := (valid_node_iff_ForestValid.mp h_valid).1
+  let j : Fin (before ++ child :: after).length :=
+    ⟨before.length, by simp⟩
+  let i : Fin rule.val.length := ⟨before.length, by rw [h_len]; simp⟩
+  have h_child := valid_node_child_at h_valid i j rfl
+  simpa [j] using h_child.1
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 lemma list_middle_eq_drop_take
@@ -2276,15 +2108,6 @@ lemma list_middle_eq_of_same_span
   have h_len : mid₁.length = mid₂.length := by
     omega
   rw [h_mid₁, h_mid₂, h_start, h_len]
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-@[simp]
-lemma leaves_node_eq_forestLeaves {cfg : @CFG α ν}
-  (n : ν) (rule : {rule // rule ∈ cfg.rules n})
-  (children : List (ParseTree cfg)) :
-    (Node (cfg := cfg) n rule children).leaves =
-      forestLeaves (cfg := cfg) children := by
-  simp [ParseTree.leaves, forestLeaves]
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 abbrev SpanVisit (ν : Type u) := ν × ℕ × ℕ
@@ -2520,27 +2343,13 @@ theorem traversable_foldl_joinUnderCache_memo_complete
       memo_complete cfg input memo →
       memo_complete cfg input
         (((Traversable.foldl joinUnderCache acc actions) memo input).2.val) := by
-  induction actions generalizing acc with
-  | nil =>
-      intro memo h_memo
-      rw [traversable_foldl_nil]
-      intro n counter pre post seen tree resultMap h_cache h_root h_adm
-        h_valid h_input
-      exact (h_acc memo h_memo) h_cache h_root h_adm h_valid h_input
-  | cons action actions ih =>
-      intro memo h_memo
-      rw [traversable_foldl_cons]
-      exact ih
-        (acc := joinUnderCache acc action)
-        (by
-          exact joinUnderCache_memo_complete
-            (cfg := cfg) (input := input)
-            (acc := acc) (act := action)
-            h_acc
-            (fun memo h_memo => h_actions action (by simp) memo h_memo))
-        (fun action' h_action' memo h_memo =>
-          h_actions action' (by simp [h_action']) memo h_memo)
-        memo h_memo
+  rw [Traversable.foldl_toList, Traversable.toList_eq_self]
+  exact List.foldlRecOn actions joinUnderCache h_acc (by
+    intro current h_current action h_action
+    exact joinUnderCache_memo_complete
+      (cfg := cfg) (input := input)
+      (acc := current) (act := action)
+      h_current (h_actions action h_action))
 
 omit [Fintype ν] in
 theorem list_foldl_traversable_joinUnderCache_memo_complete
@@ -2566,28 +2375,13 @@ theorem list_foldl_traversable_joinUnderCache_memo_complete
       memo_complete cfg input
         (((List.foldl (Traversable.foldl joinUnderCache) acc groups)
           memo input).2.val) := by
-  induction groups generalizing acc with
-  | nil =>
-      intro memo h_memo
-      simp only [List.foldl_nil]
-      intro n counter pre post seen tree resultMap h_cache h_root h_adm
-        h_valid h_input
-      exact (h_acc memo h_memo) h_cache h_root h_adm h_valid h_input
-  | cons group groups ih =>
-      intro memo h_memo
-      simp only [List.foldl_cons]
-      exact ih
-        (acc := Traversable.foldl joinUnderCache acc group)
-        (by
-          exact traversable_foldl_joinUnderCache_memo_complete
-            (cfg := cfg) (input := input)
-            (actions := group) (acc := acc)
-            h_acc
-            (fun action h_action memo h_memo =>
-              h_groups group (by simp) action h_action memo h_memo))
-        (fun group' h_group' action h_action memo h_memo =>
-          h_groups group' (by simp [h_group']) action h_action memo h_memo)
-        memo h_memo
+  exact
+    List.foldlRecOn groups (Traversable.foldl joinUnderCache) h_acc (by
+      intro current h_current group h_group
+      exact traversable_foldl_joinUnderCache_memo_complete
+        (cfg := cfg) (input := input)
+        (actions := group) (acc := current)
+        h_current (h_groups group h_group))
 
 omit [Fintype ν] in
 theorem bindContinue_memo_complete
@@ -2955,19 +2749,12 @@ theorem lower_memo_complete_of_foldl_sup
     lower_memo_complete cfg
       (parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
       input := by
-  induction parsers generalizing acc with
-  | nil =>
-      simpa using h_acc
-  | cons head tail ih =>
-      simp [List.foldl]
-      exact ih
-        (acc := acc ⊔ head)
-        (lower_sup_memo_complete
-          (cfg := cfg) (input := input)
-          acc head h_acc (h_parsers head (by simp)))
-        (by
-          intro p h_p
-          exact h_parsers p (by simp [h_p]))
+  exact List.foldlRecOn parsers
+    ParserM.instMaxOfTraversableOfDecidableEq.max h_acc (by
+      intro current h_current parser h_parser
+      exact lower_sup_memo_complete
+        (cfg := cfg) (input := input)
+        current parser h_current (h_parsers parser h_parser))
 
 omit [BEq α] [DecidableEq α] [Monad μ] [SemilatticeAlt μ] [Traversable μ]
   [Fintype ν] in
@@ -3573,41 +3360,14 @@ theorem counter_getElem?_eq_of_toKey_eq
   (h_key : Counter.toKey left = Counter.toKey right)
   (t : ν) :
     left[t]? = right[t]? := by
-  cases h_left : left[t]? with
-  | some value =>
-      have h_mem_left :
-          (t, value) ∈ Counter.toKey left := by
-        change (t, value) ∈ left.unwrap.toList
-        rw [Std.HashMap.mem_toList_iff_getElem?_eq_some]
-        exact h_left
-      have h_mem_right :
-          (t, value) ∈ Counter.toKey right := by
-        simpa [h_key] using h_mem_left
-      exact
-        (by
-          change (t, value) ∈ right.unwrap.toList at h_mem_right
-          rw [Std.HashMap.mem_toList_iff_getElem?_eq_some] at h_mem_right
-          exact h_mem_right.symm)
-  | none =>
-      cases h_right : right[t]? with
-      | none => rfl
-      | some value =>
-          have h_mem_right :
-              (t, value) ∈ Counter.toKey right := by
-            change (t, value) ∈ right.unwrap.toList
-            rw [Std.HashMap.mem_toList_iff_getElem?_eq_some]
-            exact h_right
-          have h_mem_left :
-              (t, value) ∈ Counter.toKey left := by
-            simpa [h_key] using h_mem_right
-          have h_some :
-              left[t]? = some value :=
-            by
-              change (t, value) ∈ left.unwrap.toList at h_mem_left
-              rw [Std.HashMap.mem_toList_iff_getElem?_eq_some] at h_mem_left
-              exact h_mem_left
-          rw [h_left] at h_some
-          contradiction
+  apply Option.ext
+  intro value
+  change left.unwrap[t]? = some value ↔ right.unwrap[t]? = some value
+  rw [← Std.HashMap.mem_toList_iff_getElem?_eq_some,
+    ← Std.HashMap.mem_toList_iff_getElem?_eq_some]
+  change ((t, value) ∈ Counter.toKey left) ↔
+    ((t, value) ∈ Counter.toKey right)
+  rw [h_key]
 
 
 omit [BEq α] [DecidableEq α] [Fintype ν] in
@@ -3618,18 +3378,12 @@ theorem counter_dec_getElem?_eq_of_getElem?_eq
     (left.dec n fuel)[t]? = (right.dec n fuel)[t]? := by
   by_cases h_t : t = n
   · subst t
-    have h_getD : left.getD n fuel = right.getD n fuel := by
-      repeat rw [Std.HashMap.getD_eq_getD_getElem?]
-      change left[n]?.getD fuel = right[n]?.getD fuel
-      rw [h_eq n]
-    rw [counter_dec_self_getElem?, counter_dec_self_getElem?, h_getD]
-  · have h_ne : n ≠ t := by
-      intro h_nt
-      exact h_t h_nt.symm
-    rw [counter_dec_other_getElem? (counter := left) (t := n) (u := t)
-        (fuel := fuel) h_ne,
-      counter_dec_other_getElem? (counter := right) (t := n) (u := t)
-        (fuel := fuel) h_ne,
+    rw [counter_dec_self_getElem?, counter_dec_self_getElem?]
+    simpa [Std.HashMap.getD_eq_getD_getElem?] using
+      congrArg (fun value => some (value.getD fuel - 1)) (h_eq n)
+  · have h_ne : n ≠ t := Ne.symm h_t
+    rw [counter_dec_other_getElem? (counter := left) (fuel := fuel) h_ne,
+      counter_dec_other_getElem? (counter := right) (fuel := fuel) h_ne,
       h_eq t]
 
 set_option linter.unusedSectionVars false in
@@ -3731,45 +3485,8 @@ theorem counterMatchesSeen_getElem?_ne_zero_of_initialFuel_count_lt
     (input := input) (seen := seen) (t := t)
     h_initial h_count
 
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma array_getElem?_of_toList_eq_append_singleton
-  {input : Array α} {pre post : List α} {a : α}
-  (h_input : input.toList = pre ++ a :: post) :
-    input[pre.length]? = some a := by
-  have h_list : input.toList[pre.length]? = some a := by
-    rw [h_input]
-    simp
-  simpa using h_list
-
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-abbrev validChildPair {cfg : @CFG α ν} :
-    Symbol α ν × ParseTree cfg → Prop
-  | (Symbol.term a, Leaf b) => a = b
-  | (Symbol.nonterm n, subtree@(Node n' _ _)) => n = n' ∧ subtree.Valid
-  | _ => False
-
-omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma valid_node_of_validChildPairs
-  {cfg : @CFG α ν}
-  {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
-  {children : List (ParseTree cfg)}
-  (h_len : rule.val.length = children.length)
-  (h_pairs :
-    ∀ pair, pair ∈ List.zip rule.val children →
-      validChildPair (cfg := cfg) pair) :
-    (Node (cfg := cfg) n rule children).Valid := by
-  simp [ParseTree.Valid]
-  constructor
-  · exact h_len
-  · intro sym subtree h_mem
-    have h_pair := h_pairs (sym, subtree) h_mem
-    cases sym <;> cases subtree <;>
-      simp [validChildPair] at h_pair ⊢ <;> assumption
-
-
 omit [Fintype ν] in
-theorem lower_rule_branch_result_sound_of_traverse_pairs
+theorem lower_rule_branch_result_sound_of_traverse
   {cfg : @CFG α ν}
   {n : ν} {rule : {rule // rule ∈ cfg.rules n}}
   {mkParser : Symbol α ν → ParserM (tag := tag cfg) α List (ParseTree cfg)}
@@ -3782,20 +3499,14 @@ theorem lower_rule_branch_result_sound_of_traverse_pairs
         subtrees ∈
           (((List.traverse id (rule.val.map mkParser)).lower start)
             memo input).1.getD end_ [] →
-        rule.val.length = subtrees.length ∧
-          ∀ pair, pair ∈ List.zip rule.val subtrees →
-            validChildPair (cfg := cfg) pair) :
+        ForestValid (cfg := cfg) rule.val subtrees) :
     lower_result_sound cfg n
       (Node n rule <$> List.traverse id (rule.val.map mkParser)) input := by
   apply lower_map_result_sound_of_forall
   intro memo h_memo start end_ subtrees h_subtrees
-  obtain ⟨h_len, h_pairs⟩ :=
-    h_children memo h_memo start end_ subtrees h_subtrees
-  constructor
-  · exact valid_node_of_validChildPairs
-      (cfg := cfg) (n := n) (rule := rule)
-      (children := subtrees) h_len h_pairs
-  · simp [ParseTree.root]
+  exact ⟨valid_node_iff_ForestValid.mpr
+      (h_children memo h_memo start end_ subtrees h_subtrees),
+    by simp [ParseTree.root]⟩
 
 omit [Fintype ν] in
 theorem lower_rule_branch_result_bounded_of_traverse
@@ -4207,47 +3918,39 @@ theorem lower_memo_wellFormed_generated_traverse_memoize_guarded
                 (h_step n h_counter) ih
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
-lemma validChildPair_replace_same_root
+private lemma forestPairValid_replace_same_root
   {cfg : @CFG α ν}
   {sym : Symbol α ν} {old new : ParseTree cfg}
-  (h_pair : validChildPair (cfg := cfg) (sym, old))
+  (h_pair : ForestPairValid (cfg := cfg) (sym, old))
   (h_new_valid : new.Valid)
   (h_root : new.root = old.root) :
-    validChildPair (cfg := cfg) (sym, new) := by
-  cases sym with
-  | term a =>
-      cases old with
-      | Leaf b =>
-          have h_ab : a = b := by
-            simpa [validChildPair] using h_pair
-          cases new with
-          | Leaf c =>
-              have h_bc : c = b := by
-                simpa [ParseTree.root] using h_root
-              subst b
-              subst c
-              simp [validChildPair]
-          | Node n rule children =>
-              simp [ParseTree.root] at h_root
-      | Node n rule children =>
-          simp [validChildPair] at h_pair
-  | nonterm expected =>
-      cases old with
-      | Leaf b =>
-          simp [validChildPair] at h_pair
-      | Node oldN oldRule oldChildren =>
-          have h_old : expected = oldN ∧
-              (Node (cfg := cfg) oldN oldRule oldChildren).Valid := by
-            simpa [validChildPair] using h_pair
-          obtain ⟨h_expected, _h_old_valid⟩ := h_old
-          cases new with
-          | Leaf c =>
-              simp [ParseTree.root] at h_root
-          | Node newN newRule newChildren =>
-              have h_newN : newN = oldN := by
-                simpa [ParseTree.root] using h_root
-              cases h_newN
-              exact ⟨h_expected, h_new_valid⟩
+    ForestPairValid (cfg := cfg) (sym, new) := by
+  rw [ForestPairValid_iff_valid_and_root] at h_pair ⊢
+  exact ⟨h_new_valid, h_root.trans h_pair.2⟩
+
+private theorem forall₂_replace_right
+    {γ : Type u} {δ : Type u} {R : γ → δ → Prop}
+    {leftBefore leftAfter : List γ} {rightBefore rightAfter : List δ}
+    {pivot : γ} {old new : δ}
+    (h : List.Forall₂ R
+      (leftBefore ++ pivot :: leftAfter)
+      (rightBefore ++ old :: rightAfter))
+    (h_len : leftBefore.length = rightBefore.length)
+    (h_new : R pivot new) :
+    List.Forall₂ R
+      (leftBefore ++ pivot :: leftAfter)
+      (rightBefore ++ new :: rightAfter) := by
+  have h_prefix := List.forall₂_take_append
+    (leftBefore ++ pivot :: leftAfter) rightBefore (old :: rightAfter) h
+  have h_rest := List.forall₂_drop_append
+    (leftBefore ++ pivot :: leftAfter) rightBefore (old :: rightAfter) h
+  have h_prefix' : List.Forall₂ R leftBefore rightBefore := by
+    simpa [h_len] using h_prefix
+  have h_rest' : List.Forall₂ R (pivot :: leftAfter) (old :: rightAfter) := by
+    simpa [h_len] using h_rest
+  cases h_rest' with
+  | cons _ h_tail =>
+      exact List.rel_append h_prefix' (.cons h_new h_tail)
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [DecidableEq α]
   [DecidableEq ν] [Hashable ν] [Fintype ν] in
@@ -4267,62 +3970,33 @@ lemma valid_node_replace_child_split
     (Node (cfg := cfg) n rule (before ++ new :: after)).root =
       (Node (cfg := cfg) n rule (before ++ old :: after)).root ∧
     (Node (cfg := cfg) n rule (before ++ new :: after)).leaves =
-      (Node (cfg := cfg) n rule (before ++ old :: after)).leaves ∧
+    (Node (cfg := cfg) n rule (before ++ old :: after)).leaves ∧
     sizeOf (Node (cfg := cfg) n rule (before ++ new :: after)) <
       sizeOf (Node (cfg := cfg) n rule (before ++ old :: after)) := by
-  have h_valid' := by
-    simpa [ParseTree.Valid] using h_valid
-  have h_pairs_old :
-      ∀ pair, pair ∈ List.zip rule.val (before ++ old :: after) →
-        validChildPair (cfg := cfg) pair := by
-    intro pair h_pair
-    cases pair with
-    | mk pairSym pairChild =>
-        have h := h_valid'.2 pairSym pairChild h_pair
-        cases pairSym <;> cases pairChild <;>
-          simp [validChildPair] at h ⊢ <;> assumption
-  have h_pairs_new :
-      ∀ pair, pair ∈ List.zip rule.val (before ++ new :: after) →
-        validChildPair (cfg := cfg) pair := by
-    intro pair h_pair
-    have h_pair' :
-        pair ∈ List.zip (ruleBefore ++ sym :: ruleAfter)
-          (before ++ new :: after) := by
-      simpa [h_rule] using h_pair
-    rw [List.zip_append h_before_len] at h_pair'
-    simp at h_pair'
-    cases h_pair' with
-    | inl h_prefix =>
-        exact h_pairs_old pair (by
-          rw [h_rule, List.zip_append h_before_len]
-          simp [h_prefix])
-    | inr h_rest =>
-        cases h_rest with
-        | inl h_mid =>
-            subst pair
-            have h_old_pair : validChildPair (cfg := cfg) (sym, old) := by
-              exact h_pairs_old (sym, old) (by
-                rw [h_rule, List.zip_append h_before_len]
-                simp)
-            exact validChildPair_replace_same_root
-              (cfg := cfg) h_old_pair h_new_valid h_root
-        | inr h_suffix =>
-            exact h_pairs_old pair (by
-              rw [h_rule, List.zip_append h_before_len]
-              simp [h_suffix])
-  have h_len_new : rule.val.length = (before ++ new :: after).length := by
-    simpa [List.length_append] using h_valid'.1
-  refine ⟨?_, rfl, ?_, node_sizeOf_replace_child_lt (cfg := cfg) h_size⟩
-  · unfold ParseTree.Valid
-    constructor
-    · exact h_len_new
-    · intro pair h_pair
-      cases pair with
-      | mk pairSym pairChild =>
-          have h_vcp := h_pairs_new (pairSym, pairChild) h_pair
-          cases pairSym <;> cases pairChild <;>
-            simp [validChildPair] at h_vcp ⊢ <;> assumption
-  · simp [forestLeaves, h_leaves]
+  have h_pairs :=
+    ForestValid_iff_forall₂.mp (valid_node_iff_ForestValid.mp h_valid)
+  rw [h_rule] at h_pairs
+  have h_rest := List.forall₂_drop_append
+    (ruleBefore ++ sym :: ruleAfter) before (old :: after) h_pairs
+  have h_rest' :
+      List.Forall₂
+        (fun symbol tree => ForestPairValid (cfg := cfg) (symbol, tree))
+        (sym :: ruleAfter) (old :: after) := by
+    simpa [h_before_len] using h_rest
+  have h_old_pair : ForestPairValid (cfg := cfg) (sym, old) := by
+    cases h_rest' with
+    | cons h_head _ => exact h_head
+  have h_new_pair := forestPairValid_replace_same_root
+    (cfg := cfg) h_old_pair h_new_valid h_root
+  have h_pairs_new :=
+    forall₂_replace_right h_pairs h_before_len h_new_pair
+  refine ⟨valid_node_iff_ForestValid.mpr
+      (ForestValid_iff_forall₂.mpr ?_),
+    rfl, ?_, node_sizeOf_replace_child_lt (cfg := cfg) h_size⟩
+  · simpa [h_rule] using h_pairs_new
+  · rw [ParseTree.leaves_node_eq_forestLeaves,
+      ParseTree.leaves_node_eq_forestLeaves]
+    simp [ParseTree.forestLeaves, h_leaves]
 
 omit [BEq α] [DecidableEq α] [DecidableEq ν] [Hashable ν] [Fintype ν] in
 inductive ReplaceSubtree
@@ -5197,7 +4871,7 @@ lemma lower_traverse_complete_cons_terminal
     using h_bind
 
 set_option maxHeartbeats 1000000 in
-theorem lower_generated_traverse_complete_of_admissible_valid_pairs
+theorem lower_generated_traverse_complete_of_admissible_valid_forest
   {cfg : @CFG α ν}
   (counter : Counter ν)
   (g : ((t : ν) → ParserM (tag := tag cfg) α List (ParseTree cfg)) →
@@ -5208,9 +4882,7 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
   (h_complete : memo_complete cfg input memo)
   (h_adm :
     AdmissibleForestWith cfg input seen counter children pre.length)
-  (h_len : rule.length = children.length)
-  (h_valid :
-    ∀ pair, pair ∈ List.zip rule children → validChildPair (cfg := cfg) pair)
+  (h_forest : ForestValid (cfg := cfg) rule children)
   (h_input : input.toList = pre ++ forestLeaves (cfg := cfg) children ++ post)
   (h_step :
     ∀ n,
@@ -5242,6 +4914,7 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
         (rule.map (generatedListSymbolParser cfg counter g))).lower pre.length)
         memo input).1.getD
         (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
+  obtain ⟨h_len, h_valid⟩ := h_forest
   induction rule generalizing children pre memo with
   | nil =>
       cases children with
@@ -5268,12 +4941,13 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
       | cons child tail =>
           have h_len_tail : rest.length = tail.length := by
             simpa using h_len
-          obtain ⟨h_child_adm, h_tail_adm⟩ :=
-            admissible_forest_cons_inv (cfg := cfg) h_adm
           have h_tail_valid :
-              ∀ pair, pair ∈ List.zip rest tail → validChildPair (cfg := cfg) pair := by
+              ∀ pair, pair ∈ List.zip rest tail →
+                ForestPairValid (cfg := cfg) pair := by
             intro pair h_pair
             exact h_valid pair (by simp [h_pair])
+          obtain ⟨h_child_adm, h_tail_adm⟩ :=
+            admissible_forest_cons_inv (cfg := cfg) h_adm
           have h_input_tail :
               input.toList =
                 (pre ++ child.leaves) ++ forestLeaves (cfg := cfg) tail ++ post := by
@@ -5285,12 +4959,11 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                   have h_ab : a = b := by
                     have h_head :=
                       h_valid (Symbol.term a, Leaf (cfg := cfg) b) (by simp)
-                    simpa [validChildPair] using h_head
+                    simpa [ForestPairValid] using h_head
                   cases h_ab
                   have h_term : input[pre.length]? = some a := by
-                    apply array_getElem?_of_toList_eq_append_singleton
-                    simpa [forestLeaves, ParseTree.leaves, List.append_assoc]
-                      using h_input
+                    simp [← Array.getElem?_toList, h_input, forestLeaves,
+                      ParseTree.leaves, List.append_assoc]
                   have h_tail_mem :
                       tail ∈
                         (((List.traverse id
@@ -5304,7 +4977,6 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                       (memo := memo)
                       h_complete
                       (by simpa [ParseTree.leaves] using h_tail_adm)
-                      h_len_tail h_tail_valid
                       (by
                         simpa [ParseTree.leaves] using h_input_tail)
                       (by
@@ -5313,6 +4985,7 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                         exact h_recur h_complete'
                           (by simp [h_mem])
                           h_adm_child h_child_valid h_child_input)
+                      h_len_tail h_tail_valid
                   have h_cons :=
                     lower_traverse_complete_cons_terminal
                       (cfg := cfg) (a := a)
@@ -5333,7 +5006,7 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                       h_valid
                         (Symbol.term a,
                           Node (cfg := cfg) childN rule' grandchildren) (by simp)
-                    simp [validChildPair] at h_head
+                    simp [ForestPairValid] at h_head
                   exact False.elim h_false
           | nonterm childN =>
               cases child with
@@ -5341,7 +5014,7 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                   have h_false : False := by
                     have h_head :=
                       h_valid (Symbol.nonterm childN, Leaf (cfg := cfg) b) (by simp)
-                    simp [validChildPair] at h_head
+                    simp [ForestPairValid] at h_head
                   exact False.elim h_false
               | Node n' rule' grandchildren =>
                   have h_child_valid_root :
@@ -5351,7 +5024,7 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                       h_valid
                         (Symbol.nonterm childN,
                           Node (cfg := cfg) n' rule' grandchildren) (by simp)
-                    simpa [validChildPair] using h_head
+                    simpa [ForestPairValid] using h_head
                   obtain ⟨h_eq, h_child_valid⟩ := h_child_valid_root
                   cases h_eq
                   obtain ⟨_h_no_cycle, h_budget, _h_children_adm⟩ :=
@@ -5433,14 +5106,14 @@ theorem lower_generated_traverse_complete_of_admissible_valid_pairs
                         (by
                           simpa [forestLeaves, ParseTree.leaves, List.length_append,
                             Nat.add_assoc] using h_tail_adm)
-                        h_len_tail h_tail_valid
                         h_tail_input
                         (by
                           intro memo' h_complete' childN' rule'' grandchildren'
                             pre' post' h_mem h_adm_child h_child_valid' h_child_input'
                           exact h_recur h_complete'
                             (by simp [h_mem])
-                            h_adm_child h_child_valid' h_child_input'))
+                            h_adm_child h_child_valid' h_child_input')
+                        h_len_tail h_tail_valid)
                   have h_cons :=
                     lower_traverse_complete_cons_lift_of_head_tail_complete
                       (cfg := cfg)
@@ -5843,10 +5516,7 @@ theorem lower_memo_complete_memoize
 private structure GeneratedTraverseSafety
     {cfg : @CFG α ν} (input : Array α) (rule : List (Symbol α ν))
     (start end_ : ℕ) (subtrees : List (ParseTree cfg)) : Prop where
-  length_eq : rule.length = subtrees.length
-  valid_pairs :
-    ∀ pair, pair ∈ List.zip rule subtrees →
-      validChildPair (cfg := cfg) pair
+  forest_valid : ForestValid (cfg := cfg) rule subtrees
   bounds :
     start ≤ input.size → start ≤ end_ ∧ end_ ≤ input.size
 
@@ -5893,9 +5563,7 @@ private theorem lower_generated_traverse_safety_memoize_guarded
         (start := start) (end_pos := end_)).mp (by
           simpa [List.traverse] using h_mem)
       cases h_return.2
-      refine ⟨by simp, ?_, ?_⟩
-      · intro pair h_pair
-        simp at h_pair
+      refine ⟨ForestValid_iff_forall₂.mpr .nil, ?_⟩
       · intro h_start
         cases h_return.1
         exact ⟨le_rfl, h_start⟩
@@ -5934,16 +5602,9 @@ private theorem lower_generated_traverse_safety_memoize_guarded
               have h_tail_safe :=
                 ih memo_tail h_memo_tail (start + 1) end_
                   result_tail h_tail_mem
-              refine ⟨?_, ?_, ?_⟩
-              · simp [h_tail_safe.length_eq]
-              · intro pair h_pair
-                simp at h_pair
-                cases h_pair with
-                | inl h_head_pair =>
-                    cases h_head_pair
-                    simp [validChildPair, h_head_eq]
-                | inr h_tail_pair =>
-                    exact h_tail_safe.valid_pairs pair h_tail_pair
+              refine ⟨ForestValid_iff_forall₂.mpr ?_, ?_⟩
+              · exact .cons (by simp [ForestPairValid, h_head_eq])
+                  (ForestValid_iff_forall₂.mp h_tail_safe.forest_valid)
               · intro _h_start
                 have h_tail_bounds := h_tail_safe.bounds h_start_succ
                 exact ⟨Nat.le_trans (Nat.le_succ start) h_tail_bounds.1,
@@ -5983,23 +5644,10 @@ private theorem lower_generated_traverse_safety_memoize_guarded
                 have h_tail_safe :=
                   ih memo_tail h_memo_tail split end_
                     result_tail h_tail_mem
-                refine ⟨?_, ?_, ?_⟩
-                · simp [h_tail_safe.length_eq]
-                · intro pair h_pair
-                  simp at h_pair
-                  cases h_pair with
-                  | inl h_head_pair =>
-                      cases h_head_pair
-                      cases result_head with
-                      | Leaf b =>
-                          simp [ParseTree.root] at h_head_sound
-                      | Node n' rule' children' =>
-                          obtain ⟨h_valid, h_root⟩ := h_head_sound
-                          have h_eq : n = n' := by
-                            simpa [ParseTree.root] using h_root.symm
-                          exact ⟨h_eq, h_valid⟩
-                  | inr h_tail_pair =>
-                      exact h_tail_safe.valid_pairs pair h_tail_pair
+                refine ⟨ForestValid_iff_forall₂.mpr ?_, ?_⟩
+                · exact .cons
+                    (ForestPairValid_iff_valid_and_root.mpr h_head_sound)
+                    (ForestValid_iff_forall₂.mp h_tail_safe.forest_valid)
                 · intro h_start
                   have h_head_bounds :=
                     (lower_result_bounded_memoize
@@ -6076,15 +5724,14 @@ theorem lower_generated_rule_branch_result_sound_bounded_memoize_guarded
     lower_generated_traverse_safety_memoize_guarded
       (cfg := cfg) counter g rule.val input h_body
   refine ⟨?_, ?_, ?_⟩
-  · exact lower_rule_branch_result_sound_of_traverse_pairs
+  · exact lower_rule_branch_result_sound_of_traverse
       (cfg := cfg) (n := n) (rule := rule)
       (mkParser := generatedListSymbolParser cfg counter g)
       (input := input)
       (by
         intro memo h_memo start end_ subtrees h_mem
-        have h_safe :=
-          h_traverse memo h_memo start end_ subtrees h_mem
-        exact ⟨h_safe.length_eq, h_safe.valid_pairs⟩)
+        exact
+          (h_traverse memo h_memo start end_ subtrees h_mem).forest_valid)
   · exact lower_rule_branch_result_bounded_of_traverse
       (cfg := cfg) (n := n) (rule := rule)
       (mkParser := generatedListSymbolParser cfg counter g)
@@ -6183,28 +5830,22 @@ theorem lower_result_sound_bounded_memo_of_foldl_sup
       lower_memo_wellFormed cfg
         (parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc)
         input := by
-  induction parsers generalizing acc with
-  | nil =>
-      simpa using h_acc
-  | cons head tail ih =>
-      simp [List.foldl]
-      have h_head := h_parsers head (by simp)
-      have h_acc_head :
-          lower_result_sound cfg n (acc ⊔ head) input ∧
-          lower_result_bounded cfg (acc ⊔ head) input ∧
-          lower_memo_wellFormed cfg (acc ⊔ head) input := by
-        refine ⟨?_, ?_, ?_⟩
-        · exact lower_result_sound_of_sup_sound_after_left
-            cfg n acc head input h_acc.1 h_acc.2.2 h_head.1
-        · exact lower_bounded_of_sup_bounded_after_left
-            cfg acc head input h_acc.2.1 h_acc.2.2 h_head.2.1
-        · exact lower_sup_memo_wellFormed
+  exact List.foldlRecOn
+    (motive := fun parser =>
+      lower_result_sound cfg n parser input ∧
+      lower_result_bounded cfg parser input ∧
+      lower_memo_wellFormed cfg parser input)
+    parsers ParserM.instMaxOfTraversableOfDecidableEq.max h_acc (by
+      intro current h_current parser h_parser
+      have hp := h_parsers parser h_parser
+      exact
+        ⟨lower_result_sound_of_sup_sound_after_left
+            cfg n current parser input h_current.1 h_current.2.2 hp.1,
+          lower_bounded_of_sup_bounded_after_left
+            cfg current parser input h_current.2.1 h_current.2.2 hp.2.1,
+          lower_sup_memo_wellFormed
             (cfg := cfg) (input := input)
-            acc head h_acc.2.2 h_head.2.2
-      exact ih (acc := acc ⊔ head) h_acc_head
-        (by
-          intro p h_p
-          exact h_parsers p (by simp [h_p]))
+            current parser h_current.2.2 hp.2.2⟩)
 
 set_option linter.unusedSectionVars false in
 theorem lower_gen'_result_sound_bounded_memoize
@@ -6268,15 +5909,12 @@ private theorem lower_complete_of_foldl_sup_acc
     tree ∈
       (((parsers.foldl ParserM.instMaxOfTraversableOfDecidableEq.max acc).lower start)
         memo input).1.getD end_ [] := by
-  induction parsers generalizing acc with
-  | nil =>
-      simpa using h_mem
-  | cons head tail ih =>
-      simp [List.foldl]
-      apply ih
+  exact List.foldlRecOn parsers
+    ParserM.instMaxOfTraversableOfDecidableEq.max h_mem (by
+      intro current h_current parser _h_parser
       exact (mem_lower_sup_iff_after_left
         (tag := tag cfg) (β := α)
-        acc head memo input start end_ tree).mpr (Or.inl h_mem)
+        current parser memo input start end_ tree).mpr (Or.inl h_current))
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [Fintype ν] in
 private theorem lower_gen'_selected_rule_complete
@@ -6401,20 +6039,7 @@ theorem lower_gen'_complete_of_admissible_rule
       (((gen' (μ := List) cfg (memoize counter g) n).lower pre.length)
         memo input).1.getD
         (pre.length + (forestLeaves (cfg := cfg) children).length) [] := by
-  have h_valid' :
-      rule.val.length = children.length ∧
-      ∀ pair, pair ∈ List.zip rule.val children →
-        validChildPair (cfg := cfg) pair := by
-    have h_node := by
-      simpa [ParseTree.Valid] using h_valid
-    constructor
-    · exact h_node.1
-    · intro pair h_pair
-      cases pair with
-      | mk sym subtree =>
-          have h_pair_valid := h_node.2 sym subtree h_pair
-          cases sym <;> cases subtree <;>
-            simp [validChildPair] at h_pair_valid ⊢ <;> assumption
+  have h_forest := valid_node_iff_ForestValid.mp h_valid
   have h_fold :=
     lower_gen'_selected_rule_complete
       (cfg := cfg) (recur := memoize counter g) rule
@@ -6437,12 +6062,12 @@ theorem lower_gen'_complete_of_admissible_rule
       (by
         intro selectedMemo h_selected_complete
         simpa [generatedSymbolParser, generatedListSymbolParser] using
-          (lower_generated_traverse_complete_of_admissible_valid_pairs
+          (lower_generated_traverse_complete_of_admissible_valid_forest
             (cfg := cfg) counter g
             (rule := rule.val) (children := children)
             (input := input) (memo := selectedMemo)
             (seen := seen) (pre := pre) (post := post)
-            h_selected_complete h_adm h_valid'.1 h_valid'.2 h_input
+            h_selected_complete h_adm h_forest h_input
             h_step h_recur))
   simpa [leaves_node_eq_forestLeaves] using h_fold
 
@@ -6764,30 +6389,17 @@ theorem exists_minimal_valid_tree_of_derives
         tree'.leaves = input.toList →
         sizeOf tree ≤ sizeOf tree' := by
   classical
-  let P : ℕ → Prop := fun k =>
-    ∃ tree : ParseTree cfg,
-      sizeOf tree = k ∧
-      tree.Valid ∧
-      tree.root = Symbol.nonterm n ∧
-      tree.leaves = input.toList
-  have h_exists_tree :
-      ∃ tree : ParseTree cfg,
-        tree.Valid ∧
-        tree.root = Symbol.nonterm n ∧
-        tree.leaves = input.toList := by
-    exact ParseTree.exists_Valid_tree_of_derives
+  let P : ParseTree cfg → Prop := fun tree =>
+    tree.Valid ∧ tree.root = Symbol.nonterm n ∧ tree.leaves = input.toList
+  have h_exists : ∃ tree, P tree :=
+    ParseTree.exists_Valid_tree_of_derives
       (cfg := cfg) (n := n) (w := input.toList) h_derives
-  have h_exists_size : ∃ k, P k := by
-    obtain ⟨tree, h_valid, h_root, h_leaves⟩ := h_exists_tree
-    exact ⟨sizeOf tree, tree, rfl, h_valid, h_root, h_leaves⟩
-  obtain ⟨tree, h_size, h_valid, h_root, h_leaves⟩ :=
-    Nat.find_spec h_exists_size
-  refine ⟨tree, h_valid, h_root, h_leaves, ?_⟩
-  intro tree' h_valid' h_root' h_leaves'
-  have h_tree'_size : P (sizeOf tree') :=
-    ⟨tree', rfl, h_valid', h_root', h_leaves'⟩
-  have h_min := Nat.find_min' h_exists_size h_tree'_size
-  omega
+  obtain ⟨tree, h_tree, h_min⟩ :=
+    exists_minimalFor_of_wellFoundedLT P sizeOf h_exists
+  refine ⟨tree, h_tree.1, h_tree.2.1, h_tree.2.2, ?_⟩
+  intro tree' h_valid h_root h_leaves
+  exact (le_total (sizeOf tree) (sizeOf tree')).elim id
+    (h_min ⟨h_valid, h_root, h_leaves⟩)
 
 
 omit [Monad μ] [SemilatticeAlt μ] [Traversable μ] [BEq α] [DecidableEq α]

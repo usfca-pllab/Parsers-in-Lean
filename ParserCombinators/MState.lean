@@ -1,11 +1,8 @@
 /- A monotonic version of the state monad. -/
 
-import Mathlib.Order.Lattice
-import Aesop
 import Mathlib.Control.Bifunctor
 import ParserCombinators.Order
 import ParserCombinators.Util
-import Batteries.Control.AlternativeMonad
 
 universe u
 
@@ -93,24 +90,10 @@ instance setoid (typ : τ → Type u) μ [Monad μ] [SemilatticeAlt μ] [∀ t :
 
 variable [dec_eq : ∀ t : τ, DecidableEq (typ t)] [semilat_μ : SemilatticeAlt μ]
 
-example (t : τ) : Semilatticeoid (μ (typ t)) SemilatticeAlt.instSetoid := inferInstance
-
 instance  [BEq τ] [LawfulBEq τ] [Hashable τ] [Monad μ]
   (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)]
     : Max (MemoData typ μ) where
   max a b := a.unionWith (fun _ => Std.HashMap.unionSup (instMax := Std.HashMap.instMax)) (fun _ => Std.HashMap.emptyWithCapacity) b
-
-private lemma mem_map_Equiv_left {α : Type u} {β δ : α → Type v} {k : α} {f : (a : α) → β a → δ a} [BEq α] [LawfulBEq α] [Hashable α] {m₁ m₂ : Std.DHashMap α β}
-  (h : Std.DHashMap.Equiv (m₁.map f) (m₂.map f)) (h_mem : k ∈ m₁) : k ∈ m₂ := by
-  apply Std.DHashMap.mem_of_mem_map
-  refine (Std.DHashMap.Equiv.mem_iff h).mp ?_
-  exact Std.DHashMap.mem_map.mpr h_mem
-
-private lemma mem_map_Equiv {α : Type u} {β δ : α → Type v} {k : α} {f : (a : α) → β a → δ a} [BEq α] [LawfulBEq α] [Hashable α] {m₁ m₂ : Std.DHashMap α β}
-  (h : Std.DHashMap.Equiv (m₁.map f) (m₂.map f)) : k ∈ m₁ ↔ k ∈ m₂ := by
-  constructor
-  · exact mem_map_Equiv_left h
-  · exact mem_map_Equiv_left (Std.DHashMap.Equiv.comm.mp h)
 
 @[inline]
 abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid
@@ -118,96 +101,47 @@ abbrev hm_quot_mk t := Quotient.mk (Std.HashMap.isSetoid
      (β := (Std.HashMap ℕ (μ (typ t))))
      (s := Std.HashMap.isSetoid (s := SemilatticeAlt.setoid)))
 
-example (k : τ) [LawfulBEq τ] [DecidableEq τ] [s : Setoid (μ (typ k))] [Semilatticeoid (μ (typ k)) s]
-  [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)] : Semilatticeoid (Std.HashMap (MemoEntryKey τ) (Std.HashMap ℕ (μ (typ k)))) (Std.HashMap.isSetoid (s := Std.HashMap.isSetoid)) := by
-  infer_instance
-
 private lemma unionWith_quotient_lift (k : τ) (a₁ a₂ : MemoData typ μ) [LawfulBEq τ]
     : Option.map (fun m => hm_quot_mk k m) ((a₁ ⊔ a₂).get? k) = ((a₁.map hm_quot_mk).unionSup (a₂.map hm_quot_mk)).get? k := by
   dsimp [max]
-  by_cases h : k ∈ a₁
-  · have h_or : k ∈ a₁ ∨ k ∈ a₂ := Or.inl h
-    -- rw [Std.DHashMap.get?_eq_some_get]
-    · simp_all [hm_quot_mk]
-      by_cases h₂ : k ∈ a₂
-      · unfold Std.DHashMap.unionSup  Std.DHashMap.unionWith
-        simp [Std.DHashMap.ofList_eq_insertMany_empty]
-        simp [Std.DHashMap.get?_insertMany_list]
-        simp [<- List.map_reverse, List.findSome?_map]
-        unfold Function.comp
-        simp only []
-        rw [h_findSome?_eq_some']
-        · simp only [Option.some_or, Option.map_some]
-          rw [h_findSome?_eq_some']
-          · simp [hm_quot_mk, Std.DHashMap.getD_map]
-            simp [<- Std.DHashMap.get_eq_getD, Std.DHashMap.get?_eq_some_get, h, h₂]
-            rfl
-          · simp_all
-        · simp_all
-      · have h_comm := Std.DHashMap.unionSup_equiv_comm (Std.DHashMap.map hm_quot_mk a₁) (Std.DHashMap.map hm_quot_mk a₂)
-        rw [Std.DHashMap.Equiv.get?_eq h_comm]
-        rw [Std.DHashMap.unionSup_getElem_of_not_contains]
-        · rw [Std.DHashMap.get?_map]
-          unfold hm_quot_mk
-          simp only [Std.DHashMap.unionWith, Std.DHashMap.ofList_eq_insertMany_empty]
-          simp [Std.DHashMap.get?_insertMany_list, -Quotient.eq]
-          simp only [<- List.map_reverse, List.findSome?_map]
-          unfold Function.comp
-          simp only []
-          have h_keys₂ : k ∉ a₂.keys.reverse := by
-            intro h
-            simp at h
-            contradiction
-          simp [Std.HashMap.isSetoid]
-          rw [h_findSome?_eq_none']
-          rw [h_findSome?_eq_some']
-          simp
-          rw [Std.DHashMap.get?_eq_some_get (h := h)]
-          · simp
-            rw [Std.DHashMap.getD_eq_fallback h₂]
-            rw [<- Std.DHashMap.get_eq_getD (h := h)]
-            -- splitting this into two steps because the heuristics of `exact` slow the proof checker down
-            have h' := Std.HashMap.unionSup_empty_equiv_self (s := Std.HashMap.isSetoid) (Std.DHashMap.get a₁ k h)
-            exact h'
-          · simp [h]
-          · simp [h₂]
-        · simp [h₂]
+  by_cases h₁ : k ∈ a₁
   · by_cases h₂ : k ∈ a₂
-    · have h_or : k ∈ a₁ ∨ k ∈ a₂ := Or.inr h₂
-      simp_all
+    · have hm₁ : k ∈ a₁.map hm_quot_mk := by simpa
+      have hm₂ : k ∈ a₂.map hm_quot_mk := by simpa
+      rw [Std.DHashMap.unionWith_getElem_both h₁ h₂]
+      rw [Std.DHashMap.unionSup_getElem_both hm₁ hm₂]
+      simp [hm_quot_mk]
+      rfl
+    · have hm₂ : k ∉ a₂.map hm_quot_mk := by simpa
+      rw [Std.DHashMap.unionWith_getElem_not_contains_right a₁ a₂ h₂]
+      rw [Std.DHashMap.Equiv.get?_eq
+        (Std.DHashMap.unionSup_equiv_comm
+          (a₁.map hm_quot_mk) (a₂.map hm_quot_mk))]
+      rw [Std.DHashMap.unionSup_getElem_of_not_contains _ _ hm₂]
+      rw [Std.DHashMap.get?_map, Std.DHashMap.get?_eq_some_get h₁]
+      simp only [Option.map_some]
+      apply congrArg some
+      have h' := Std.HashMap.unionSup_empty_equiv_self
+        (s := Std.HashMap.isSetoid) (a₁.get k h₁)
       unfold hm_quot_mk
-      rw [Std.DHashMap.unionSup_getElem_of_not_contains]
-      simp only [Std.DHashMap.unionWith, Std.DHashMap.ofList_eq_insertMany_empty]
-      simp [Std.DHashMap.get?_insertMany_list, -Quotient.eq]
-      simp only [<- List.map_reverse, List.findSome?_map]
-      unfold Function.comp
-      simp only []
-      have h_keys₁ : k ∉ a₁.keys.reverse := by
-        intro h
-        simp at h
-        contradiction
-      simp [Std.HashMap.isSetoid]
-      rw [h_findSome?_eq_some']
-      rw [h_findSome?_eq_none']
-      simp
-      rw [Std.DHashMap.get?_eq_some_get (h := h₂)]
-      · simp
-        rw [Std.DHashMap.getD_eq_fallback h]
-        rw [<- Std.DHashMap.get_eq_getD (h := h₂)]
-        -- splitting this into two steps because the heuristics of `exact` slow the proof checker down
-        have h' := Std.HashMap.empty_unionSup_equiv_self (s := Std.HashMap.isSetoid) (Std.DHashMap.get a₂ k h₂)
-        exact h'
-      · simp [h]
-      · simp [h₂]
-      · simp_all
-    · repeat rw [Std.DHashMap.get?_eq_none]
-      · simp
-      · intro h'
-        apply Std.DHashMap.mem_iff_unionWith_mem.mp at h'
-        simp_all
-      · intro h'
-        apply Std.DHashMap.mem_iff_unionWith_mem.mp at h'
-        simp_all
+      exact Quotient.eq.mpr h'
+  · by_cases h₂ : k ∈ a₂
+    · have hm₁ : k ∉ a₁.map hm_quot_mk := by simpa
+      rw [Std.DHashMap.unionWith_getElem_not_contains a₁ a₂ h₁]
+      rw [Std.DHashMap.unionSup_getElem_of_not_contains _ _ hm₁]
+      rw [Std.DHashMap.get?_map, Std.DHashMap.get?_eq_some_get h₂]
+      simp only [Option.map_some]
+      apply congrArg some
+      have h' := Std.HashMap.empty_unionSup_equiv_self
+        (s := Std.HashMap.isSetoid) (a₂.get k h₂)
+      unfold hm_quot_mk
+      exact Quotient.eq.mpr h'
+    · have hm₁ : k ∉ a₁.map hm_quot_mk := by simpa
+      rw [Std.DHashMap.unionWith_getElem_not_contains a₁ a₂ h₁]
+      rw [Std.DHashMap.get?_eq_none h₂]
+      rw [Std.DHashMap.unionSup_getElem_of_not_contains _ _ hm₁]
+      rw [Std.DHashMap.get?_map, Std.DHashMap.get?_eq_none h₂]
+      rfl
 
 private lemma unionWith_quotient_lift' (a₁ a₂ : MemoData typ μ) [LawfulBEq τ]
     : (Std.DHashMap.map hm_quot_mk (a₁ ⊔ a₂)).Equiv ((a₁.map hm_quot_mk).unionSup (a₂.map hm_quot_mk)) := by
@@ -238,25 +172,6 @@ instance : Max (Quotient (setoid typ μ)) where
   max q₁ q₂ := by
     refine Quotient.liftOn₂ q₁ q₂ (fun a b => Quotient.mk (setoid typ μ) $ max a b) ?_
     exact id quot_max_wf
-
-private lemma unionWith_get_both {k} (a b : MemoData typ μ) (h₁ : k ∈ a) (h₂ : k ∈ b) failure
-     : (Std.DHashMap.unionWith (fun _ ↦ Std.HashMap.unionSup) (fun _ ↦ Std.HashMap.emptyWithCapacity) a b).getD k failure = some ((a.get k h₁).unionSup (b.get k h₂)) := by
-    rw [Std.DHashMap.getD_eq_getD_get?]
-    rw [Std.DHashMap.unionWith_getElem_both]
-    · simp
-    · exact h₁
-    · exact h₂
-
-private lemma unionWith_get_one {k} (a b : MemoData typ μ) (h₁ : k ∉ a) failure
-     : ((Std.DHashMap.unionWith (fun _ ↦ Std.HashMap.unionSup) (fun _ ↦ Std.HashMap.emptyWithCapacity) a b).getD k failure).EquivQuot (s := Std.HashMap.isSetoid) (b.getD k failure) := by
-    repeat rw [Std.DHashMap.getD_eq_getD_get?]
-    rw [Std.DHashMap.unionWith_getElem_not_contains]
-    · by_cases h₂ : k ∈ b
-      · simp [Std.DHashMap.get?_eq_some_get, h₂]
-        have goal := Std.HashMap.empty_unionSup_equiv_self (s := Std.HashMap.isSetoid) (Std.DHashMap.get b k h₂)
-        exact goal
-      · simp [Std.DHashMap.get?_eq_none, h₂]
-    · exact h₁
 
 instance : SemilatticeSup (Quotient (setoid typ μ)) := by
   have h := unionWith_quotient_lift (typ := typ) (μ := μ)

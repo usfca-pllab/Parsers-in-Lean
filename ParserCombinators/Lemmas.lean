@@ -118,16 +118,10 @@ theorem hashMap_insert_emptyWithCapacity_toList_eq_singleton
   have h_mem : (k, v) ∈ m.toList := by
     rw [Std.HashMap.mem_toList_iff_getElem?_eq_some]
     simp [m]
-  cases h_list : m.toList with
-  | nil => simp [h_list] at h_len
-  | cons head tail =>
-      cases tail with
-      | nil =>
-          simp [h_list] at h_mem
-          subst head
-          rfl
-      | cons _ _ =>
-          simp [h_list] at h_len
+  obtain ⟨head, h_head⟩ := List.length_eq_one_iff.mp h_len
+  simp [h_head] at h_mem
+  subst head
+  exact h_head
 
 omit [Fintype τ] [BEq τ] [LawfulBEq τ] [Hashable τ] [DecidableEq τ]
   [Monad μ] [Traversable μ] [SemilatticeAlt μ]
@@ -165,9 +159,8 @@ theorem traversable_foldl_append
   {σ α : Type u} (f : σ → α → σ) (init : σ) (xs ys : List α) :
     Traversable.foldl f init (xs ++ ys) =
       Traversable.foldl f (Traversable.foldl f init xs) ys := by
-  induction xs generalizing init with
-  | nil => rfl
-  | cons x xs ih => exact ih (f init x)
+  simpa only [Traversable.foldl_toList, Traversable.toList_eq_self] using
+    (@List.foldl_append α σ f init xs ys)
 
 
 set_option linter.unusedSectionVars false in
@@ -383,14 +376,11 @@ theorem mem_traversable_foldl_joinUnderCache_of_acc
   (end_pos : ℕ) (x : α)
   (h : x ∈ (acc memo input).1.getD end_pos []) :
     x ∈ ((Traversable.foldl joinUnderCache acc actions) memo input).1.getD end_pos [] := by
-  induction actions generalizing acc memo with
-  | nil =>
-      simp [Traversable.foldl]
-      exact h
-  | cons action rest ih =>
-      rw [traversable_foldl_cons]
-      exact ih (acc := joinUnderCache acc action) memo
-        (mem_joinUnderCache_left acc action memo input end_pos x h)
+  rw [Traversable.foldl_toList, Traversable.toList_eq_self]
+  exact List.foldlRecOn actions joinUnderCache h (by
+    intro current h_current action _
+    exact mem_joinUnderCache_left
+      current action memo input end_pos x h_current)
 
 set_option linter.unusedSectionVars false in
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
@@ -474,13 +464,11 @@ theorem mem_list_foldl_traversable_joinUnderCache_of_acc
   (h : x ∈ (acc memo input).1.getD end_pos []) :
     x ∈ ((List.foldl (Traversable.foldl joinUnderCache) acc actionGroups)
       memo input).1.getD end_pos [] := by
-  induction actionGroups generalizing acc memo with
-  | nil =>
-      simpa using h
-  | cons actions rest ih =>
-      simp [List.foldl]
-      exact ih (acc := Traversable.foldl joinUnderCache acc actions) memo
-        (mem_traversable_foldl_joinUnderCache_of_acc actions acc memo input end_pos x h)
+  exact List.foldlRecOn actionGroups
+    (Traversable.foldl joinUnderCache) h (by
+      intro current h_current actions _
+      exact mem_traversable_foldl_joinUnderCache_of_acc
+        actions current memo input end_pos x h_current)
 
 set_option linter.unusedSectionVars false in
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
@@ -890,33 +878,14 @@ theorem bindActions_forall₂_snd_val_eq
       (Parser.bindActions (tag := tag) (β := β) pivotToResult f)
       (Parser.bindActions (tag := tag) (β := β) pivotToResult g) := by
   unfold Parser.bindActions
-  let pairs := pivotToResult.toList
-  change List.Forall₂
-      (List.Forall₂
-        (fun action action' => ∀ memo input,
-          (action memo input).2.val = (action' memo input).2.val))
-      (List.map
-        (fun pair : ℕ × List δ =>
-          match pair with
-          | (j, values) => List.map (fun a => f a j) values)
-        pairs)
-      (List.map
-        (fun pair : ℕ × List δ =>
-          match pair with
-          | (j, values) => List.map (fun a => g a j) values)
-        pairs)
-  induction pairs with
-  | nil =>
-      exact List.Forall₂.nil
-  | cons pair _ ih =>
-      rcases pair with ⟨split, values⟩
-      apply List.Forall₂.cons
-      · induction values with
-        | nil =>
-            exact List.Forall₂.nil
-        | cons a _ ih_values =>
-            exact List.Forall₂.cons (h a split) ih_values
-      · exact ih
+  rw [List.forall₂_map_left_iff, List.forall₂_map_right_iff,
+    List.forall₂_same]
+  rintro ⟨split, values⟩ _
+  change List.Forall₂ _ (values.map fun a => f a split)
+    (values.map fun a => g a split)
+  rw [List.forall₂_map_left_iff, List.forall₂_map_right_iff,
+    List.forall₂_same]
+  exact fun a _ => h a split
 
 set_option linter.unusedSectionVars false in
 omit α [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] [DecidableEq α] in
@@ -978,23 +947,17 @@ theorem bindActionPrefix_snd_val_eq_of_forall
     apply list_foldl_traversable_joinUnderCache_snd_val_eq_of_forall
     · intro memo input
       rfl
-    · induction prePairs with
-      | nil =>
-          exact List.Forall₂.nil
-      | cons pair pairs ih =>
-          rcases pair with ⟨j, values⟩
-          apply List.Forall₂.cons
-          · induction values with
-            | nil =>
-                exact List.Forall₂.nil
-            | cons a values ih_values =>
-                exact List.Forall₂.cons (h a j) ih_values
-          · exact ih
-  · induction preValues with
-    | nil =>
-        exact List.Forall₂.nil
-    | cons a values ih =>
-        exact List.Forall₂.cons (h a split) ih
+    · rw [List.forall₂_map_left_iff, List.forall₂_map_right_iff,
+        List.forall₂_same]
+      rintro ⟨j, values⟩ _
+      change List.Forall₂ _ (values.map fun a => (k a).lower j)
+        (values.map fun a => (g a).lower j)
+      rw [List.forall₂_map_left_iff, List.forall₂_map_right_iff,
+        List.forall₂_same]
+      exact fun a _ => h a j
+  · rw [List.forall₂_map_left_iff, List.forall₂_map_right_iff,
+      List.forall₂_same]
+    exact fun a _ => h a split
 
 set_option linter.unusedSectionVars false in
 omit α [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] [DecidableEq α] in
@@ -1122,22 +1085,16 @@ theorem traversable_foldl_joinUnderCache_snd_val_eq_self
     ∀ action ∈ actions, ∀ memo input, (action memo input).2.val = memo) :
     ((Traversable.foldl joinUnderCache acc actions) memo input).2.val =
       memo := by
-  induction actions generalizing acc memo with
-  | nil =>
-      simpa [traversable_foldl_nil] using h_acc memo input
-  | cons action actions ih =>
-      rw [traversable_foldl_cons]
-      exact ih
-        (acc := joinUnderCache acc action)
-        (memo := memo)
-        (fun memo input => by
-          rw [joinUnderCache_snd_eq]
-          change (action (↑((acc memo input).2)) input).2.val = memo
-          rw [h_actions action (by simp)
-            (↑((acc memo input).2)) input]
-          exact h_acc memo input)
-        (fun action' h_action' memo input =>
-          h_actions action' (by simp [h_action']) memo input)
+  rw [Traversable.foldl_toList, Traversable.toList_eq_self]
+  exact (List.foldlRecOn
+    (motive := fun current =>
+      ∀ memo input, (current memo input).2.val = memo)
+    actions joinUnderCache h_acc (by
+      intro current h_current action h_action memo input
+      rw [joinUnderCache_snd_eq]
+      change (action (↑((current memo input).2)) input).2.val = memo
+      rw [h_actions action h_action (↑((current memo input).2)) input]
+      exact h_current memo input)) memo input
 
 set_option linter.unusedSectionVars false in
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in
@@ -1156,24 +1113,16 @@ theorem list_foldl_traversable_joinUnderCache_snd_val_eq_self
       ∀ memo input, (action memo input).2.val = memo) :
     ((List.foldl (Traversable.foldl joinUnderCache) acc groups)
       memo input).2.val = memo := by
-  induction groups generalizing acc memo with
-  | nil =>
-      simpa using h_acc memo input
-  | cons group groups ih =>
-      simp only [List.foldl_cons]
-      exact ih
-        (acc := Traversable.foldl joinUnderCache acc group)
-        (memo := memo)
-        (fun memo input =>
-          traversable_foldl_joinUnderCache_snd_val_eq_self
-            (tag := tag) (β := β)
-            (actions := group) (acc := acc)
-            (memo := memo) (input := input)
-            h_acc
-            (fun action h_action memo input =>
-              h_groups group (by simp) action h_action memo input))
-        (fun group' h_group' action h_action memo input =>
-          h_groups group' (by simp [h_group']) action h_action memo input)
+  exact (List.foldlRecOn
+    (motive := fun current =>
+      ∀ memo input, (current memo input).2.val = memo)
+    groups (Traversable.foldl joinUnderCache) h_acc (by
+      intro current h_current group h_group memo input
+      exact traversable_foldl_joinUnderCache_snd_val_eq_self
+        (tag := tag) (β := β)
+        (actions := group) (acc := current)
+        (memo := memo) (input := input)
+        h_current (h_groups group h_group))) memo input
 
 set_option linter.unusedSectionVars false in
 omit [Fintype τ] [Monad μ] [Traversable μ] [SemilatticeAlt μ] in

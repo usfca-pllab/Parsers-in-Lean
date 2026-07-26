@@ -1,11 +1,5 @@
-import Mathlib.Order.Lattice
-import Mathlib.Order.BoundedOrder.Basic
-import Batteries.Control.AlternativeMonad
 import Mathlib.Control.Traversable.Basic
-import Mathlib.Order.TypeTags
-import Mathlib.Tactic.NthRewrite
 import Mathlib.Data.List.Monad
-import Aesop
 import Mathlib.Order.BoundedOrder.Lattice
 
 -- Structures related to order theory.
@@ -42,35 +36,11 @@ theorem bot_sup_eq' {a : α} : Quotient.mk s (⊥ ⊔ a) = ⟦a⟧ := by {
   apply bot_sup_eq
 }
 
-theorem lift_le_sup_left {a b : α} : a ≤ a ⊔ b := by {
-  dsimp [LE.le]
-  rw [<- quot_max_eq_max_quot]
-  exact le_sup_left
-}
-
 theorem lift_le_sup_right {a b : α} : b ≤ a ⊔ b := by {
   dsimp [LE.le]
   rw [<- quot_max_eq_max_quot]
   exact le_sup_right
 }
-
-theorem lift_sup_le {a b c : α} : a ≤ c → b ≤ c → a ⊔ b ≤ c := by {
-  dsimp [LE.le]
-  rw [<- quot_max_eq_max_quot]
-  exact sup_le
-}
-
-theorem antisymm_equiv {a b : α} (h₁ : a ≤ b) (h₂ : b ≤ a)
-    : a ≈ b := by {
-  apply Quotient.exact
-  dsimp [LE.le] at h₁ h₂
-  exact antisymm h₁ h₂
-}
-
--- additional theorems
-theorem lift_sup_comm  {a b : α} : Quotient.mk s (a ⊔ b) = Quotient.mk s (b ⊔ a) := by
-  repeat rw [<- quot_max_eq_max_quot]
-  exact sup_comm ⟦a⟧ ⟦b⟧
 
 end Semilatticeoid
 
@@ -284,30 +254,16 @@ instance : Monad Const where
   | top, _ => top
   | some a, f => f a
 
-instance : LawfulMonad Const where
-  map_const := by simp [Functor.map, Functor.mapConst]
-  id_map x := by
-    simp [Functor.map]
-    cases x <;> simp
-  seqLeft_eq x y:= by
-    simp [SeqLeft.seqLeft, Functor.map, Seq.seq]
-    unfold Function.const Function.comp
-    simp only []
-    cases x <;> cases y <;> simp_all
-  seqRight_eq x y := by
-    simp [SeqRight.seqRight, Functor.map, Seq.seq]
-    unfold Function.const Function.comp
-    cases x <;> cases y <;> simp_all
-  pure_seq g x := by simp [Seq.seq, Functor.map]
-  bind_pure_comp f x := by
-    simp [Bind.bind, Functor.map, Pure.pure]
-    rfl
-  bind_map := by
-    simp [Bind.bind, Functor.map, Seq.seq]
-  pure_bind x f :=  by simp [Bind.bind]
-  bind_assoc x f g := by
-    simp [Bind.bind]
-    cases x <;> simp
+instance : LawfulMonad Const := LawfulMonad.mk'
+  (id_map := by
+    intro _ x
+    cases x <;> rfl)
+  (pure_bind := by
+    intros
+    rfl)
+  (bind_assoc := by
+    intro _ _ _ x _ _
+    cases x <;> rfl)
 
 private def quot_max_eq_max_quot [DecidableEq α] (a b : Const α) : (Quotient.mk (isSetoid α) a) ⊔ ⟦b⟧ = ⟦a ⊔ b⟧ := by
     dsimp [Max.max, SemilatticeSup.toMax]

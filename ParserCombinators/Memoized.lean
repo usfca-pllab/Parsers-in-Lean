@@ -8,14 +8,9 @@ import Std.Data.HashMap.Lemmas
 import Mathlib.Control.Traversable.Basic
 import Mathlib.Control.Fold
 import Mathlib.Data.ENat.Basic
-import Mathlib.Data.ENat.Defs
-import Mathlib.Data.Fintype.Sets
-import Mathlib.Data.Multiset.DershowitzManna
-import Mathlib.Order.OrderIsoNat
-import Batteries.Control.AlternativeMonad
+import Mathlib.Data.DFinsupp.WellFounded
 import ParserCombinators.MState
 import ParserCombinators.Util
-import Aesop
 
 -- β is the alphabet: parsers work over Array β
 universe u v
@@ -138,55 +133,26 @@ instance [Monad μ] [Traversable μ] [DecidableEq α] : Max (ParserM (tag := tag
 
 end ParserM
 
--- TODO: prove that the relevant laws hold for the monad instance
 instance [Monad μ] [Traversable μ] : LawfulMonad (ParserM (tag := tag) β μ) := by
-  refine LawfulMonad.mk' _ ?_ ?_ ?_
-  · intro a x
-    -- Simplified to Right Identity law instead of
-    -- Functor Identity Law, and proved inductively
-    simp [Functor.map]
+  refine LawfulMonad.mk' (id_map := ?_) (pure_bind := ?_) (bind_assoc := ?_)
+  · intro _ x
     induction x with
-    -- Trivial success case (base)
-    | Return a => rfl
-    -- Inductive case
+    | Return _ => rfl
     | Bind p k ih =>
-      simp [ParserM.bind]
-      ext x; exact ih x
-  · intros a f
-    simp [Bind.bind, ParserM.bind]
-  · intros _ _ _ x f g
-    -- Start by expanding the definition of >>= (which is ParserM.bind)
-    -- Now prove by induction on x
+      simp only [Functor.map, ParserM.bind]
+      congr
+      funext x
+      exact ih x
+  · intros
+    rfl
+  · intro _ _ _ x f g
     induction x generalizing f g with
-    -- Base Case 1: x = Return a'
-    | Return a' =>
-      -- Goal simplifies to: (f a' >>= g) = (f a' >>= g)
-      rfl
-    -- Inductive Case: x = Bind p k
+    | Return _ => rfl
     | Bind p k ih =>
-      simp [Bind.bind]
-      simp [ParserM.bind]
-      apply funext
-      intro x
-      have h := ih x f g
-      simp [Bind.bind] at h
-      exact h
-
-
-
--- TODO: (madi- from constrained monad paper)
-namespace ParserM
-
-omit [Monad μ] [LawfulMonad μ] in
-theorem lower_preserves_identity
-  [Monad μ] [Traversable μ] [DecidableEq α]
-  (x : α) :
-    (ParserM.Return (tag := tag) (β := β) (μ := μ) x).lower =
-      (pure x : Parser (tag := tag) β μ α) := by
-  rfl
-
-end ParserM
-
+      simp only [Bind.bind, ParserM.bind]
+      congr
+      funext x
+      exact ih x f g
 
 -- theorem lower_preserves_composition
   -- Homomorphism property 2: lower (p >>= f) = lower p >>= (lower ∘ f)
@@ -242,9 +208,12 @@ def PLessThan (a b : Counter τ) : Prop :=
   ∃ t : τ, (∃ h_a : t ∈ a.unwrap, (h_b : t ∈ b.unwrap) → a.unwrap[t] < b.unwrap[t]) ∧
     ∀ t' : τ, t ≠ t' → a.unwrap[t']? = b.unwrap[t']?
 
-/-- Convert the counters to a multiset of extended naturals (missing elements are mapped to `⊤`). -/
-noncomputable def toMultiset [fintype : Fintype τ] (a : Counter τ) : Multiset ℕ∞ :=
-  (Multiset.ofList fintype.elems.toList).map (fun t => (NatCast.natCast <$> a.get? t).getD ⊤)
+/--
+Pointwise rank of a counter. Missing entries rank as `⊤`, so inserting a
+finite budget or decreasing an existing budget strictly lowers one coordinate.
+-/
+def value (a : Counter τ) (t : τ) : ℕ∞ :=
+  (NatCast.natCast <$> a.unwrap[t]?).getD ⊤
 
 variable [Fintype τ]
 
@@ -255,71 +224,27 @@ instance (priority := high) wf : WellFoundedRelation (Counter τ) where
   rel := LT.lt
   wf := by
     apply WellFounded.transGen
-    apply Subrelation.wf ?_ (InvImage.wf toMultiset Multiset.instWellFoundedisDershowitzMannaLT.wf)
-    simp [Subrelation, WellFoundedRelation.rel]
-    unfold InvImage
-    unfold unwrap id
-    intro a b t h_a h_lt h_eq
-    unfold Multiset.IsDershowitzMannaLT
-    use a.toMultiset - {NatCast.natCast a.unwrap[t]}
-    use {NatCast.natCast a.unwrap[t]}
-    have h_multiset_a : a.toMultiset = a.toMultiset.erase ↑a.unwrap[t] + {↑a.unwrap[t]} := by
-      rw [add_comm]
-      simp
-      rw [Multiset.cons_erase]
-      simp [toMultiset, Fintype.complete]
-      use t
-      simp [h_a, unwrap]
-    have h_a_get_t : (fun x ↦ (Option.map NatCast.natCast a.unwrap[x]?).getD ⊤) t = ENat.instNatCast.natCast a.unwrap[t] := by
-      simp [unwrap, h_a]
-    unfold unwrap id at h_a_get_t
-    by_cases h_b : t ∈ b.unwrap <;> simp [unwrap] at h_b
-    · use {NatCast.natCast b.unwrap[t]}
-      have h_b_get_t : (fun x ↦ (Option.map NatCast.natCast b.unwrap[x]?).getD ENat.instOrderTop.top) t = ↑b.unwrap[t] := by
-        simp [unwrap, h_b]
-      unfold unwrap id at h_b_get_t
-      simp
-      constructor
-      · assumption
-      · constructor
-        · rw [<- Multiset.add_sub_cancel (s := b.toMultiset) (t := {↑ b.unwrap[t]})]
-          · simp [toMultiset, unwrap]
-            rw [<- h_a_get_t]
-            rw [<- h_b_get_t]
-            repeat rw [<- Multiset.map_erase_of_mem] <;> try simp [Fintype.complete]
-            apply Multiset.map_congr (by rfl)
-            intro t'
-            intro h_t'_neq_t
-            rw [<- Finset.erase_val, Finset.mem_val] at h_t'_neq_t
-            simp at h_t'_neq_t
-            have a_get_t'_eq_b_get_t' := h_eq t' $ h_t'_neq_t.left.imp symm
-            rw [a_get_t'_eq_b_get_t']
-          · simp [toMultiset]
-            use t
-            simp [Fintype.complete, h_b, unwrap]
-        · exact h_lt h_b
-    · use {⊤}
-      have h_b_get_t : (fun x ↦ (Option.map NatCast.natCast b.unwrap[x]?).getD ⊤) t = ENat.instOrderTop.top := by
-        simp [unwrap, h_b]
-      unfold unwrap id at h_b_get_t
-      simp
-      constructor
-      · assumption
-      · rw [<- Multiset.add_sub_cancel (s := b.toMultiset) (t := {⊤})]
-        · simp [toMultiset, unwrap]
-          rw [<- h_a_get_t]
-          nth_rw 2 [<- h_b_get_t]
-          repeat rw [<- Multiset.map_erase_of_mem] <;> try simp [Fintype.complete]
-          apply Multiset.map_congr (by rfl)
-          intro t'
-          intro h_t'_neq_t
-          rw [<- Finset.erase_val, Finset.mem_val] at h_t'_neq_t
-          simp at h_t'_neq_t
-          have a_get_t'_eq_b_get_t' := h_eq t' $ h_t'_neq_t.left.imp symm
-          rw [a_get_t'_eq_b_get_t']
-        · simp [toMultiset]
-          use t
-          simp [Fintype.complete, h_b]
+    apply Subrelation.wf ?_ <|
+      InvImage.wf value (inferInstanceAs (WellFoundedLT (τ → ℕ∞))).wf
+    intro a b h
+    change value a < value b
+    rcases h with ⟨t, ⟨h_a, h_lt⟩, h_eq⟩
+    rw [lt_iff_le_not_ge]
+    constructor
+    · intro t'
+      by_cases h_t : t' = t
+      · subst t'
+        by_cases h_b : t ∈ b.unwrap
+        · simp [value, h_a, h_b, Nat.cast_le.2 (Nat.le_of_lt (h_lt h_b))]
+        · simp [value, h_a, h_b]
+      · unfold value
+        rw [h_eq t' (Ne.symm h_t)]
+    · intro h_ba
+      have h_at_t := h_ba t
+      by_cases h_b : t ∈ b.unwrap
+      · simp [value, h_a, h_b, Nat.cast_le] at h_at_t
+        exact (Nat.not_le_of_lt (h_lt h_b)) h_at_t
+      · simp [value, h_a, h_b] at h_at_t
 
 /-- Decrement the value for the given tag if it exists, otherwise insert given default budget. -/
 def dec (counter : Counter τ) (t : τ) (default : ℕ) : Counter τ :=
@@ -545,13 +470,10 @@ theorem withFuel'_induction {τ} [Monad μ] [Traversable μ] [DecidableEq α] {g
   (h_base : p (fun _ => ⊥))
   (h_recur : ∀ recur, p recur -> p (g recur))
   (n : ℕ)
-    : p (withFuel' g n) := by induction n with
-  | zero =>
-    unfold withFuel'
-    exact h_base
-  | succ n' ih =>
-    unfold withFuel'
-    exact h_recur (withFuel' g n') ih
+    : p (withFuel' g n) := by
+  induction n with
+  | zero => exact h_base
+  | succ n ih => exact h_recur (withFuel' g n) ih
 
 abbrev homogeneousTag (α : Type u) {ι : Type u} (_ : ι) : Type u := α
 

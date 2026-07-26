@@ -56,14 +56,10 @@ private def justB : ValidTreeS :=
 
 private theorem tailForestValid (tail : ValidTreeS) :
     ForestValid (cfg := my_cfg) [nonterm S] [tail.val.val] := by
-  rcases tail with ⟨⟨tree, hValid⟩, hRoot⟩
-  cases tree with
-  | Leaf terminal =>
-      simp at hRoot
-  | Node n rule children =>
-      cases n
-      unfold ForestValid
-      simp [ForestPairValid, hValid]
+  rw [ForestValid_iff_forall₂]
+  exact .cons
+    (ForestPairValid_iff_valid_and_root.mpr
+      ⟨tail.val.property, tail.property⟩) .nil
 
 private def consA (tail : ValidTreeS) : ValidTreeS :=
   ⟨⟨Node S ruleAS [Leaf .a, tail.val.val], by
