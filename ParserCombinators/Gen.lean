@@ -1800,42 +1800,31 @@ theorem memo_wellFormed_memoizeStep_compute
       (memoizeStep counter g n next start memo input).2.val := by
   let body :=
     (((g (next (input.size - start + 1)) n).lower start) memo input)
-  have h_insert :
+  have h_body_memo_body : memo_wellFormed cfg input body.2.val := by
+    simpa [body] using h_body_memo
+  have h_join :
       memo_wellFormed cfg input
-        (body.2.val.insert n
-          ((body.2.val.getD n ⊥).insert
-            (Counter.toKey counter, start) body.1)) := by
-    have h_cached :
-        memo_wellFormed cfg input
-          (memoWithCachedResult cfg body.2.val n
-            (Counter.toKey counter) start body.1) :=
-      memo_wellFormed_memoWithCachedResult
-        (cfg := cfg) (input := input)
-        (memo := body.2.val) (n := n)
-        (key := Counter.toKey counter) (start := start)
-        (resultMap := body.1)
-        (by simpa [body] using h_body_memo)
+        (memoWithCachedResult cfg body.2.val n
+          (Counter.toKey counter) start
+          (body.1.unionSup (cachedResultMap cfg body.2.val n
+            (Counter.toKey counter) start))) :=
+    memo_wellFormed_memoWithCachedResult
+      h_body_memo_body
+      (resultMap_sound_sup
         (by simpa [body] using h_body_sound)
+        (resultMap_sound_of_memo_sound h_body_memo_body.1
+          n (Counter.toKey counter) start))
+      (resultMap_bounded_sup
         (by simpa [body] using h_body_bounded)
-    simpa [memoWithCachedResult, Bot.bot] using h_cached
-  have h_sup :
-      memo_wellFormed cfg input
-        ((body.2.val.insert n
-          ((body.2.val.getD n ⊥).insert
-            (Counter.toKey counter, start) body.1)) ⊔ body.2.val) :=
-    memo_wellFormed_sup
-      (cfg := cfg) (input := input)
-      (left := body.2.val.insert n
-        ((body.2.val.getD n ⊥).insert
-          (Counter.toKey counter, start) body.1))
-      (right := body.2.val)
-      h_insert (by simpa [body] using h_body_memo)
+        (resultMap_bounded_of_memo_bounded h_body_memo_body.2
+          n (Counter.toKey counter) start))
   rw [memoizeStep_compute_snd_val_eq
     (counter := counter) (g := g) (next := next) (t := n)
     (memo := memo) (input := input) (start := start)
     h_no_cache]
-  simpa [body]
-    using h_sup
+  simpa [MemoData.cacheInsertSup, Std.HashMap.insertSup,
+    memoWithCachedResult, cachedResultMap, Std.HashMap.instMax, Bot.bot, body]
+    using h_join
 
 set_option linter.unusedSectionVars false in
 theorem memo_wellFormed_memoizeStep
@@ -3023,48 +3012,33 @@ theorem memo_complete_memoizeStep_compute
       resultMap_complete cfg input n (Counter.toKey counter) start body.1 := by
     dsimp [body]
     exact h_body_result
-  have h_insert :
+  have h_join_result :
+      resultMap_complete cfg input n (Counter.toKey counter) start
+        (body.1.unionSup (cachedResultMap cfg body.2.val n
+          (Counter.toKey counter) start)) := by
+    intro counter' pre post seen tree h_key h_start h_root h_adm
+      h_valid h_input
+    exact resultMap_mem_unionSup_left
+      (h_body_result_body h_key h_start h_root h_adm h_valid h_input)
+  have h_join :
       memo_complete cfg input
-        (body.2.val.insert n
-          ((body.2.val.getD n ⊥).insert
-            (Counter.toKey counter, start) body.1)) := by
-    have h_cached :
-        memo_complete cfg input
-          (memoWithCachedResult cfg body.2.val n
-            (Counter.toKey counter) start body.1) :=
-      memo_complete_memoWithCachedResult
-        (cfg := cfg) (input := input)
-        (memo := body.2.val) (n := n)
-        (key := Counter.toKey counter) (start := start)
-        (resultMap := body.1)
-        h_body_memo_body
-        h_body_result_body
-    intro n' counter' pre' post' seen' tree' resultMap' h_cache h_root
-      h_adm h_valid h_input
-    exact h_cached
-      (by simpa [memoWithCachedResult, Bot.bot] using h_cache)
-      h_root h_adm h_valid h_input
-  have h_sup :
-      memo_complete cfg input
-        ((body.2.val.insert n
-          ((body.2.val.getD n ⊥).insert
-            (Counter.toKey counter, start) body.1)) ⊔ body.2.val) :=
-    memo_complete_sup
+        (memoWithCachedResult cfg body.2.val n
+          (Counter.toKey counter) start
+          (body.1.unionSup (cachedResultMap cfg body.2.val n
+            (Counter.toKey counter) start))) :=
+    memo_complete_memoWithCachedResult
       (cfg := cfg) (input := input)
-      (left := body.2.val.insert n
-        ((body.2.val.getD n ⊥).insert
-          (Counter.toKey counter, start) body.1))
-      (right := body.2.val)
-      h_insert h_body_memo_body
+      h_body_memo_body h_join_result
   rw [memoizeStep_compute_snd_val_eq
     (counter := counter) (g := g) (next := next) (t := n)
     (memo := memo) (input := input) (start := start)
     h_no_cache]
   change memo_complete cfg input
-    ((body.2.val.insert n
-      ((body.2.val.getD n ⊥).insert
-        (Counter.toKey counter, start) body.1)) ⊔ body.2.val)
-  exact h_sup
+    (memoWithCachedResult cfg body.2.val n
+      (Counter.toKey counter) start
+      (body.1.unionSup (cachedResultMap cfg body.2.val n
+        (Counter.toKey counter) start)))
+  exact h_join
 
 set_option linter.unusedSectionVars false in
 theorem memo_complete_memoizeStep

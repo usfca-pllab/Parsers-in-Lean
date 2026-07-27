@@ -254,3 +254,138 @@ instance (typ : τ → Type u) [∀ t : τ, DecidableEq (typ t)] : Semilatticeoi
     simp [Bot.bot]
 
 end MemoData.Order
+
+namespace MemoData
+
+variable {τ : Type u} {typ : τ → Type u} {μ : Type u → Type u}
+  [BEq τ] [LawfulBEq τ] [Hashable τ] [DecidableEq τ]
+  [Monad μ] [SemilatticeAlt μ] [∀ t : τ, DecidableEq (typ t)]
+
+/--
+Grow one memo cell without rebuilding the rest of the memo table.
+
+The new result is placed on the left of the cell join, matching the observable choice order of
+the previous whole-table join.
+-/
+def cacheInsertSup
+    (memo : MemoData typ μ) (t : τ) (key : MemoEntryKey τ)
+    (results : Std.HashMap ℕ (μ (typ t))) : MemoData typ μ :=
+  let positionMap := memo.getD t ⊥
+  memo.insert t (positionMap.insertSup key results)
+
+set_option linter.unusedSectionVars false in
+theorem cacheInsertSup_get_target
+    (memo : MemoData typ μ) (t : τ) (key : MemoEntryKey τ)
+    (results : Std.HashMap ℕ (μ (typ t))) :
+    ((cacheInsertSup memo t key results).getD t ⊥)[key]? =
+      some (results ⊔ (memo.getD t ⊥).getD key ⊥) := by
+  simp [cacheInsertSup, Std.HashMap.insertSup, Bot.bot]
+
+theorem cacheInsertSup_equiv_old
+    (memo : MemoData typ μ) (t : τ) (key : MemoEntryKey τ)
+    (results : Std.HashMap ℕ (μ (typ t))) :
+    Equiv (cacheInsertSup memo t key results)
+      ((memo.insert t ((memo.getD t ⊥).insert key results)) ⊔ memo) := by
+  unfold Equiv
+  simp only [Max.max]
+  apply Std.DHashMap.Equiv.of_forall_get?_eq
+  intro t'
+  simp only [Std.DHashMap.get?_map]
+  by_cases h : t' = t
+  · subst t'
+    by_cases ht : t ∈ memo
+    · rw [Std.DHashMap.unionWith_getElem_both (by simp) ht]
+      simp [cacheInsertSup]
+      rw [Std.DHashMap.get_eq_getD]
+      exact Std.HashMap.insertSup_equiv_insert_unionSup
+        (s := Std.HashMap.isSetoid
+          (s := SemilatticeAlt.setoid))
+        (semi := Std.HashMap.instSemilatticeoidIsSetoid
+          (s := SemilatticeAlt.setoid)
+          (semi := SemilatticeAlt.instSemilatticeoidInstSetoid μ))
+        (m := memo.getD t ⊥) (k := key) (v := results)
+    · rw [Std.DHashMap.unionWith_getElem_not_contains_right
+        (memo.insert t ((memo.getD t ⊥).insert key results)) memo ht]
+      simp [cacheInsertSup]
+      rw [Std.DHashMap.getD_eq_fallback ht]
+      exact Std.HashMap.insertSup_equiv_insert_unionSup
+        (s := Std.HashMap.isSetoid
+          (s := SemilatticeAlt.setoid))
+        (semi := Std.HashMap.instSemilatticeoidIsSetoid
+          (s := SemilatticeAlt.setoid)
+          (semi := SemilatticeAlt.instSemilatticeoidInstSetoid μ))
+        (m := (Std.HashMap.emptyWithCapacity :
+          Std.HashMap (MemoEntryKey τ) (Std.HashMap ℕ (μ (typ t)))))
+        (k := key) (v := results)
+  · have ht_ne : t ≠ t' := Ne.symm h
+    simp only [cacheInsertSup]
+    by_cases ht' : t' ∈ memo
+    · have ht'_insert :
+          t' ∈ memo.insert t ((memo.getD t ⊥).insert key results) := by
+        simp [ht', ht_ne]
+      rw [Std.DHashMap.unionWith_getElem_both ht'_insert ht']
+      have h_local_get :
+          (memo.insert t ((memo.getD t ⊥).insertSup key results)).get? t' =
+            memo.get? t' := by
+        rw [Std.DHashMap.get?_insert]
+        simp [ht_ne]
+      rw [h_local_get, Std.DHashMap.get?_eq_some_get ht']
+      have h_overwrite_get :
+          (memo.insert t ((memo.getD t ⊥).insert key results)).get t' ht'_insert =
+            memo.get t' ht' := by
+        have hopt :
+            (memo.insert t ((memo.getD t ⊥).insert key results)).get? t' =
+              memo.get? t' := by
+          rw [Std.DHashMap.get?_insert]
+          simp [ht_ne]
+        rw [Std.DHashMap.get?_eq_some_get ht'_insert,
+          Std.DHashMap.get?_eq_some_get ht'] at hopt
+        exact Option.some.inj hopt
+      rw [h_overwrite_get]
+      simp only [Option.map_some]
+      have hidem :=
+        Std.HashMap.unionSup_equiv_idem
+          (s := Std.HashMap.isSetoid
+            (s := SemilatticeAlt.setoid))
+          (semi := Std.HashMap.instSemilatticeoidIsSetoid
+            (s := SemilatticeAlt.setoid)
+            (semi := SemilatticeAlt.instSemilatticeoidInstSetoid μ))
+          (memo.get t' ht')
+      apply congrArg some
+      exact Quotient.eq.mpr
+        (Std.HashMap.EquivQuot.symm
+          (s := Std.HashMap.isSetoid
+            (s := SemilatticeAlt.setoid))
+          hidem)
+    · have ht'_insert :
+          t' ∉ memo.insert t ((memo.getD t ⊥).insert key results) := by
+        simp [ht', ht_ne]
+      rw [Std.DHashMap.unionWith_getElem_not_contains
+        (memo.insert t ((memo.getD t ⊥).insert key results)) memo
+        ht'_insert]
+      have h_local_get :
+          (memo.insert t ((memo.getD t ⊥).insertSup key results)).get? t' =
+            memo.get? t' := by
+        rw [Std.DHashMap.get?_insert]
+        simp [ht_ne]
+      rw [h_local_get, Std.DHashMap.get?_eq_none ht']
+      rfl
+
+theorem le_cacheInsertSup
+    (memo : MemoData typ μ) (t : τ) (key : MemoEntryKey τ)
+    (results : Std.HashMap ℕ (μ (typ t))) :
+    memo ≤ cacheInsertSup memo t key results := by
+  change Quotient.mk (MemoData.setoid typ μ) memo ≤
+    Quotient.mk (MemoData.setoid typ μ)
+      (cacheInsertSup memo t key results)
+  have hq :
+      Quotient.mk (MemoData.setoid typ μ)
+          (cacheInsertSup memo t key results) =
+        Quotient.mk (MemoData.setoid typ μ)
+          ((memo.insert t ((memo.getD t ⊥).insert key results)) ⊔ memo) :=
+    Quotient.sound (cacheInsertSup_equiv_old memo t key results)
+  rw [hq]
+  rw [← Semilatticeoid.quot_max_eq_max_quot]
+  exact le_sup_right
+
+end MemoData

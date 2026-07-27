@@ -1676,9 +1676,7 @@ theorem memoizeStep_compute_snd_val_eq
       let result :=
         (((g (next (input.size - start + 1)) t).lower start) memo input)
       let key : MemoEntryKey τ := (Counter.toKey counter, start)
-      let updatedPositionMap := result.2.val.getD t ⊥
-      let updatedMemo := result.2.val.insert t (updatedPositionMap.insert key result.1)
-      updatedMemo ⊔ result.2.val := by
+      MemoData.cacheInsertSup result.2.val t key result.1 := by
   unfold memoizeStep
   simp [h_no_cache]
 

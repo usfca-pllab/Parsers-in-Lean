@@ -303,11 +303,11 @@ def memoizeStep [Monad μ] [Traversable μ] [Fintype τ]
     | none =>
         let result := ((g (next (input.size - pos + 1)) t).lower pos) memo input
         let results := result.1
-        let updatedPositionMap := result.2.val.getD t ⊥
-        let updatedMemo := result.2.val.insert t (updatedPositionMap.insert key results)
-        (results, ⟨updatedMemo ⊔ result.2.val,
-          Preorder.le_trans memo result.2.val (updatedMemo ⊔ result.2.val)
-            result.2.property Semilatticeoid.lift_le_sup_right⟩)
+        let updatedMemo := MemoData.cacheInsertSup result.2.val t key results
+        (results, ⟨updatedMemo,
+          Preorder.le_trans memo result.2.val updatedMemo
+            result.2.property (MemoData.le_cacheInsertSup
+              result.2.val t key results)⟩)
 
 set_option linter.unusedVariables false in
 def memoize [Monad μ] [Traversable μ] [Fintype τ]
